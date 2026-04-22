@@ -58,3 +58,6 @@ logs/
 # Data
 data/cache/
 data/raw/
+
+# Obsidian (local editor)
+.obsidian/

@@ -90,3 +90,26 @@
 - 3 auto-fixed
 - All internal cross-references verified (15 cross-links between articles)
 - All raw source references verified (pointing to project files in docs/foundation/, docs/roadmaps/, findings.md)
+
+## [2026-04-22] ingest | Phase 0 Implementation Completed
+- All 11 tasks from phase0-implementation-plan.md implemented and verified
+- Key implementation decisions during coding:
+  - StrEnum (Python 3.12+) used instead of (str, Enum) per ruff UP042 rule
+  - `datetime.UTC` used instead of `timezone.utc` per ruff UP017 rule
+  - Domain exception `__init__` methods got explicit docstrings to satisfy D107
+  - `from __future__ import annotations` required in all files per ruff isort config
+  - `structlog.get_logger()` return type needs explicit cast for mypy strict
+  - pyproject.toml `ignore_missing_imports` overridemodule list includes `mcp.*`, `respx.*`, `typer.*`
+- All acceptance criteria verified:
+  - `pip install -e ".[dev]"` works ✓
+  - `python -c "import github_discovery"` works ✓
+  - `make lint && make format-check && make typecheck && make test` all pass ✓
+  - `make ci` passes (ruff + mypy --strict + 46 tests) ✓
+  - Settings(), logging, exceptions, session models, MCP specs all verified ✓
+  - `.kilo/mcp.json` and `.kilo/mcp.json.template` are valid JSON ✓
+- Context7 verification confirmed before implementation:
+  - Pydantic BaseSettings/SettingsConfigDict patterns ✓
+  - pydantic-settings nested delimiter support ✓
+  - structlog stdlib ProcessorFormatter integration ✓
+  - MCP FastMCP tool/resource/prompt decorators ✓
+  - pytest import-mode=importlib for src layout ✓

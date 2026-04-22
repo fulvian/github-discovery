@@ -1,0 +1,13 @@
+{
+  "mcp": {
+    "github-discovery": {
+      "type": "local",
+      "command": ["python", "-m", "github_discovery.mcp", "serve", "--transport", "stdio"],
+      "environment": {
+        "GHDISC_GITHUB_TOKEN": "{env:GITHUB_TOKEN}",
+        "GHDISC_SESSION_BACKEND": "sqlite",
+        "GHDISC_MCP_TRANSPORT": "stdio"
+      }
+    }
+  }
+}
