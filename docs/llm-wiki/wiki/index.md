@@ -29,3 +29,6 @@
 - [Agent Workflow Patterns](patterns/agent-workflows.md) — MCP prompt skills, standard agent workflow, CLI patterns, permission/security models | Updated: 2026-04-22
 - [Technology Stack Decisions](patterns/tech-stack.md) — Verified tech stack (Python 3.12+, FastAPI, Pydantic v2, httpx, MCP SDK), integrations, coding conventions | Updated: 2026-04-22
 - [Operational Rules and Workflow Standards](patterns/operational-rules.md) — Guiding principles, hard architecture constraints, error handling standards | Updated: 2026-04-22
+- [Phase 0 Implementation Decisions](patterns/phase0-implementation.md) — Detailed implementation decisions for Phase 0: config architecture, exception hierarchy, session models, MCP spec models, logging, ruff/mypy/pytest configuration | Updated: 2026-04-22
+- [Python Development Tooling Configuration](patterns/dev-tooling-and-ci.md) — Context7-verified configurations for pydantic-settings, structlog, ruff, pytest, pre-commit, mypy | Updated: 2026-04-22
+- [MCP Python SDK Verification](apis/mcp-sdk-verification.md) — Context7-verified MCP Python SDK API patterns: FastMCP, tools, resources, Context, progress notifications, transports | Updated: 2026-04-22

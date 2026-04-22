@@ -69,6 +69,21 @@
 ## [2026-04-22] ingest | Wiki Index populated
 - Updated wiki/index.md with all 14 articles across 4 topic directories
 
+## [2026-04-22] ingest | Phase 0 Implementation Decisions
+- Ingested from Context7-verified research and Phase 0 implementation plan
+- Created wiki/patterns/phase0-implementation.md
+- Covers: pyproject.toml, config architecture, exception hierarchy, session models, MCP spec models, logging, ruff/mypy/pytest
+
+## [2026-04-22] ingest | Python Development Tooling Configuration
+- Ingested from Context7 verification of pydantic-settings, structlog, ruff, pytest, pre-commit
+- Created wiki/patterns/dev-tooling-and-ci.md
+- Covers: SettingsConfigDict patterns, structlog stdlib integration, ruff rule selection rationale, pytest src layout, pre-commit config
+
+## [2026-04-22] ingest | MCP Python SDK Verification
+- Ingested from Context7 verification of /modelcontextprotocol/python-sdk v1.x
+- Created wiki/apis/mcp-sdk-verification.md
+- Covers: FastMCP setup, tool definition with Context, progress notifications (report_progress not deprecated progress()), transport configuration, elicitation
+
 ## [2026-04-22] lint | Initial wiki health check
 - 14 articles created across 4 directories (architecture, apis, domain, patterns)
 - 3 issues found: broken raw links to findings.md (wrong relative path `../../../findings.md` → fixed to `../../../../findings.md`)
