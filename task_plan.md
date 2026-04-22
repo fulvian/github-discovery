@@ -28,6 +28,36 @@ Questo crea un bias sistematico che esclude progetti tecnicamente eccellenti ma 
 - [x] Definizione aree di approfondimento
 - [x] Domande aperte per iterazioni successive
 
+### Phase 0: Scaffolding [complete]
+- [x] pyproject.toml + build system
+- [x] Package structure (src/github_discovery/)
+- [x] Configuration (pydantic-settings, GHDISC_ env vars)
+- [x] Exception hierarchy
+- [x] Structured logging (structlog)
+- [x] Session models (SessionState, SessionConfig, ProgressInfo)
+- [x] MCP spec models (MCPToolSpec, AgentWorkflowConfig)
+- [x] CLI skeleton (typer)
+- [x] MCP server skeleton (FastMCP)
+- [x] Test infrastructure (pytest, ruff, mypy)
+- [x] CI (GitHub Actions, pre-commit)
+
+### Phase 1: Data Models & Type System [complete]
+- [x] 1.7 Enums (ScoreDimension: FUNCTIONALITY/INNOVATION, CandidateStatus)
+- [x] 1.1 RepoCandidate, CandidatePool
+- [x] 1.2 Gate 1 screening models (7 sub-scores + MetadataScreenResult)
+- [x] 1.3 Gate 2 screening models (4 sub-scores + StaticScreenResult + ScreeningResult)
+- [x] 1.4 Assessment models (DimensionScore, TokenUsage, DeepAssessmentResult)
+- [x] 1.5 Scoring models (DomainProfile, ScoreResult, RankedRepo, ExplainabilityReport)
+- [x] 1.8 Feature Store (FeatureStoreKey, RepoFeatures)
+- [x] 1.6 API request/response models
+- [x] 1.9 Agent models (MCPToolResult, DiscoverySession)
+- [x] `make ci` green: ruff + mypy --strict + 140 tests passing
+
+### Next: Phase 2 — Discovery Engine (Layer A)
+- Multi-channel candidate discovery
+- GitHub API integration (httpx)
+- Pool management and dedup
+
 ## Deliverables
 - `docs/foundation/github-discovery_foundation_blueprint.md`
 - `findings.md`

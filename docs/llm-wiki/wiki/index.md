@@ -32,3 +32,4 @@
 - [Phase 0 Implementation Decisions](patterns/phase0-implementation.md) — Detailed implementation decisions for Phase 0: config architecture, exception hierarchy, session models, MCP spec models, logging, ruff/mypy/pytest configuration | Updated: 2026-04-22
 - [Python Development Tooling Configuration](patterns/dev-tooling-and-ci.md) — Context7-verified configurations for pydantic-settings, structlog, ruff, pytest, pre-commit, mypy | Updated: 2026-04-22
 - [MCP Python SDK Verification](apis/mcp-sdk-verification.md) — Context7-verified MCP Python SDK API patterns: FastMCP, tools, resources, Context, progress notifications, transports | Updated: 2026-04-22
+- [Phase 1 Data Models Implementation Decisions](patterns/phase1-models-implementation.md) — Detailed implementation decisions for Phase 1: ScoreDimension realignment, SubScore pattern, RepoCandidate, ValueScore computed_field, Feature Store SHA dedup, MCPToolResult context-efficient design | Updated: 2026-04-22

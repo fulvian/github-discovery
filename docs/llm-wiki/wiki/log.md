@@ -113,3 +113,18 @@
   - structlog stdlib ProcessorFormatter integration ✓
   - MCP FastMCP tool/resource/prompt decorators ✓
   - pytest import-mode=importlib for src layout ✓
+
+## [2026-04-22] ingest | Phase 1 Data Models Implementation Decisions
+- Ingested from Context7-verified Pydantic v2 patterns and Phase 1 implementation plan
+- Created wiki/patterns/phase1-models-implementation.md
+- Covers: ScoreDimension realignment (COMMUNITY→FUNCTIONALITY, NOVELTY→INNOVATION), SubScore base pattern, RepoCandidate design, ValueScore computed_field, DomainProfile predefined weights, Feature Store SHA dedup, MCPToolResult context-efficient output, 7 new model files planned
+- Updated wiki/index.md with new article entry
+- Cross-referenced from phase0-implementation.md
+
+## [2026-04-22] ingest | Phase 1 Data Models Implementation Complete
+- Updated wiki/patterns/phase1-models-implementation.md with actual implementation results
+- All 9 model files written: enums, candidate, screening, assessment, scoring, features, api, agent, __init__
+- 113 new unit tests (140 total including Phase 0) — all passing
+- `make ci` green: ruff + mypy --strict + pytest
+- Key issues resolved: computed_field mypy prop-decorator, TestFootprintScore pytest collection, model_validate for constraints, Makefile venv python
+- Updated wiki/index.md with completion status

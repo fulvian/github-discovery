@@ -1,7 +1,7 @@
 """Domain enumerations for GitHub Discovery.
 
 Defines the core enums used across the scoring pipeline:
-DomainType, GateLevel, ScoreDimension, DiscoveryChannel.
+DomainType, GateLevel, ScoreDimension, DiscoveryChannel, CandidateStatus.
 """
 
 from __future__ import annotations
@@ -35,7 +35,18 @@ class GateLevel(StrEnum):
 
 
 class ScoreDimension(StrEnum):
-    """Scoring dimensions for repository evaluation."""
+    """Scoring dimensions for repository evaluation.
+
+    Aligned with Blueprint §7 — 8 evaluation dimensions:
+    1. Code Quality (20% default)
+    2. Architecture & Modularity (15%)
+    3. Testability & Verification (15%)
+    4. Documentation & Developer Experience (10%)
+    5. Maintenance & Project Operations (15%)
+    6. Security & Supply Chain Hygiene (10%)
+    7. Functional Completeness (10%)
+    8. Innovation & Distinctiveness (5%)
+    """
 
     CODE_QUALITY = "code_quality"
     ARCHITECTURE = "architecture"
@@ -43,8 +54,8 @@ class ScoreDimension(StrEnum):
     DOCUMENTATION = "documentation"
     SECURITY = "security"
     MAINTENANCE = "maintenance"
-    COMMUNITY = "community"
-    NOVELTY = "novelty"
+    FUNCTIONALITY = "functionality"
+    INNOVATION = "innovation"
 
 
 class DiscoveryChannel(StrEnum):
@@ -56,3 +67,19 @@ class DiscoveryChannel(StrEnum):
     REGISTRY = "registry"
     AWESOME_LIST = "awesome_list"
     SEED_EXPANSION = "seed_expansion"
+
+
+class CandidateStatus(StrEnum):
+    """Status of a repo candidate through the pipeline."""
+
+    DISCOVERED = "discovered"
+    SCREENING_GATE1 = "screening_gate1"
+    SCREENING_GATE2 = "screening_gate2"
+    GATE1_PASSED = "gate1_passed"
+    GATE1_FAILED = "gate1_failed"
+    GATE2_PASSED = "gate2_passed"
+    GATE2_FAILED = "gate2_failed"
+    ASSESSING = "assessing"
+    ASSESSED = "assessed"
+    RANKED = "ranked"
+    EXCLUDED = "excluded"
