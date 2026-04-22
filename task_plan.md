@@ -53,10 +53,20 @@ Questo crea un bias sistematico che esclude progetti tecnicamente eccellenti ma 
 - [x] 1.9 Agent models (MCPToolResult, DiscoverySession)
 - [x] `make ci` green: ruff + mypy --strict + 140 tests passing
 
-### Next: Phase 2 — Discovery Engine (Layer A)
-- Multi-channel candidate discovery
-- GitHub API integration (httpx)
-- Pool management and dedup
+### Phase 2: Discovery Engine (Layer A) [complete]
+- [x] Phase 2 implementation plan created: `docs/plans/phase2-implementation-plan.md`
+- [x] Task 2.1 — GitHub REST API Client (httpx, auth, rate limit, retry, pagination) — 16 tests
+- [x] Task 2.2 — GitHub GraphQL Client (cursor-based pagination) — 13 tests
+- [x] Task 2.3 — Search API Channel (query builder, filtri, sort recency) — 11 tests
+- [x] Task 2.4 — Code Search Channel (quality signal patterns) — 13 tests
+- [x] Task 2.5 — Dependency Graph Channel — 25 tests
+- [x] Task 2.6 — Package Registry Channel (PyPI, npm) — 30 tests
+- [x] Task 2.7 — Awesome Lists & Curated Sources Channel — 17 tests
+- [x] Task 2.8 — Seed Expansion (co-contributor, org adjacency) — 25 tests
+- [x] Task 2.9 — Discovery Orchestrator (coordination, dedup, scoring) — 15 tests
+- [x] Task 2.10 — Candidate Pool Manager (SQLite persistence) — 13 tests
+- [x] `discovery/__init__.py` exports updated
+- [x] `make ci` green: ruff + mypy --strict + 320 tests passing
 
 ## Deliverables
 - `docs/foundation/github-discovery_foundation_blueprint.md`

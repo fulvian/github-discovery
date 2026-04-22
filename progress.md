@@ -104,3 +104,54 @@
 - Ruff RUF022 unsorted `__all__` → auto-fixed
 - Ruff B017 blind exceptions → `# noqa: B017`
 - Makefile bare commands → `$(PYTHON) -m` with venv python
+
+## Session: 2026-04-22 (Phase 2 Planning)
+
+### 18:00 — Phase 2 Discovery Engine Implementation Plan Created
+- Created `docs/plans/phase2-implementation-plan.md`
+- Followed AGENTS.md session start protocol: wiki → relevant articles → Context7 → plan
+- Context7 verification completed for:
+  - httpx AsyncClient, AsyncHTTPTransport(retries), Auth subclass, event hooks
+  - pytest-httpx HTTPXMock fixture, add_response, custom headers, reusable responses
+  - GitHub REST API: /search/repositories, /search/code, /rate_limit, conditional requests (ETag)
+  - GitHub GraphQL: cursor-based pagination (first/after, pageInfo), rateLimit cost
+  - GitHub dependency-graph/sbom API
+- Plan covers 10 tasks (2.1-2.10) with:
+  - Detailed design per module with code signatures
+  - ~79 unit tests planned across 10 test files
+  - New dependency: aiosqlite>=0.20 for SQLite pool persistence
+  - Implementation sequence in 4 phases (A→B→C→D) over 2-3 weeks
+  - Risk assessment with mitigations
+- Wiki updated:
+  - Updated wiki/index.md with plan reference
+  - Updated wiki/log.md with ingest entry
+  - Updated task_plan.md with Phase 2 task breakdown
+
+## Session: 2026-04-22 (Phase 2 Implementation)
+
+### 20:00 — Phase 2 Discovery Engine Complete
+- All 10 tasks (2.1–2.10) implemented and verified
+- 320 tests passing (149 new + 171 pre-existing), `make ci` green
+- 45 source files pass mypy --strict, 77 files pass ruff check/format
+
+### Modules Created
+- **Infrastructure**: `github_client.py`, `graphql_client.py`, `pool.py`, `types.py`
+- **Channels**: `search_channel.py`, `curated_channel.py`, `code_search_channel.py`, `registry_channel.py`, `dependency_channel.py`, `seed_expansion.py`
+- **Integration**: `orchestrator.py`, `__init__.py` (exports)
+
+### Key Decisions
+- `_BearerAuth(httpx.Auth)` uses `Generator[Request, Response, None]` not `Iterator` for httpx compatibility
+- HTTP status codes as named constants (`_HTTP_FORBIDDEN`, `_HTTP_NOT_MODIFIED`)
+- `contextlib.suppress` replaces try/except/pass blocks
+- Pydantic models need runtime imports (`# noqa: TC001`, not TYPE_CHECKING)
+- `CandidatePool.total_count` is `@property`, not constructor param
+- `DiscoveryChannel.AWESOME_LIST` (not CURATED) for curated channel
+- Discovery scoring: base + breadth bonus + channel quality bonuses, capped at 1.0
+- `SeedExpansion.expand()` takes `seed_urls` not `DiscoveryQuery` — orchestrator special-cases it
+- `DependencyChannel.discover_dependents()` returns empty (no public GitHub API for dependents)
+
+### Files Modified
+- `pyproject.toml` — Added aiosqlite>=0.20, pytest-httpx>=0.30
+- `src/github_discovery/discovery/` — 12 new modules
+- `tests/unit/discovery/` — 10 new test files + updated conftest.py
+- `docs/llm-wiki/wiki/` — Updated phase2-discovery-plan.md, index.md, log.md

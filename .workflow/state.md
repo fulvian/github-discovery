@@ -1,14 +1,14 @@
 # Project State
 
-## Current Phase: Phase 1 — Data Models & Type System COMPLETE
+## Current Phase: Phase 2 — Discovery Engine (Layer A) COMPLETE
 ## Started: 2026-04-22T11:06:00+02:00
 ## PRD: docs/foundation/github-discovery_foundation_blueprint.md
 ## Roadmap: docs/roadmaps/github-discovery_foundation_roadmap.md
 ## Phase 0 Plan: docs/plans/phase0-implementation-plan.md
 ## Phase 1 Plan: docs/plans/phase1-implementation-plan.md
-## TDD: Pending (next phase)
-## Implementation: Phase 0 + Phase 1 complete (9 model files, 140 tests)
-## Tests: 140 passing (ruff + mypy --strict + pytest)
+## Phase 2 Plan: docs/plans/phase2-implementation-plan.md
+## Implementation: Phase 0 + Phase 1 + Phase 2 complete (320 tests)
+## Tests: 320 passing (ruff + mypy --strict + pytest)
 ## Deployment: Pending
 
 ## Agent History
@@ -26,15 +26,20 @@
 | 2026-04-22T14:00+02:00 | General Manager | Phase 1 implementation plan + wiki update | Done |
 | 2026-04-22T15:30+02:00 | Coder | Phase 1 data models — all 9 tasks implemented + 113 tests | Done |
 | 2026-04-22T16:30+02:00 | Coder | Phase 1 lint/type fixes, Makefile venv fix, make ci green | Done |
+| 2026-04-22T18:00+02:00 | General Manager | Phase 2 implementation plan + Context7 verification | Done |
+| 2026-04-22T19:00+02:00 | Coder | Task 2.1 REST Client + Task 2.10 Pool Manager | Done |
+| 2026-04-22T20:00+02:00 | Coder | Tasks 2.2–2.9: GraphQL, 6 channels, Orchestrator (149 tests) | Done |
+| 2026-04-22T20:22+02:00 | General Manager | Wiki update + commit + push | In Progress |
 
 ## Skills Invoked
 | Phase | Skill | Outcome |
 |-------|-------|---------|
 | Phase 1 | planning-with-files | Planning persistente attivato |
+| Phase 2 | planning-with-files | Phase 2 plan execution tracked |
 
 ## Notes
-- Phase 0 + Phase 1 complete and verified
-- `make ci` green: ruff + mypy --strict + 140 tests
-- 9 model files: enums, candidate, screening, assessment, scoring, features, api, agent, __init__
-- Next phase: Phase 2 — Discovery Engine (Layer A)
-- LLM Wiki updated with Phase 1 completion knowledge
+- Phase 0 + Phase 1 + Phase 2 complete and verified
+- `make ci` green: ruff + mypy --strict + 320 tests
+- 12 discovery modules: github_client, graphql_client, pool, types, search_channel, curated_channel, code_search_channel, registry_channel, dependency_channel, seed_expansion, orchestrator, __init__
+- Next phase: Phase 3 — Screening (Gate 1 + Gate 2)
+- LLM Wiki updated with Phase 2 completion knowledge

@@ -140,3 +140,32 @@
   - LOW: mcp/config.py was an empty stub duplicating config.py:MCPSettings. Added clarifying docstring.
 - After fixes: `make ci` green — 0 lint errors, 0 typecheck errors, 142 tests passed (2 new)
 - Verified: `python -m github_discovery` and `python -m github_discovery --help` work correctly
+
+## [2026-04-22] ingest | Phase 2 Discovery Engine Implementation Plan
+- Created docs/plans/phase2-implementation-plan.md
+- Context7 verification of httpx, pytest-httpx, GitHub REST API, GitHub GraphQL API before planning
+- Covers 10 tasks: REST client, GraphQL client, 6 discovery channels, orchestrator, pool manager
+- Key patterns verified: AsyncClient auth/retry/event hooks, cursor-based GraphQL pagination, REST Link header pagination, search/code search rate limits, pytest-httpx mocking
+- New dependency needed: aiosqlite>=0.20 for SQLite pool persistence
+- ~79 unit tests planned across 10 test files
+- Updated wiki/index.md with new plan reference
+
+## [2026-04-22] ingest | Phase 2 Discovery Engine Implementation Complete
+- All 10 tasks (2.1–2.10) implemented and verified
+- 320 tests passing (149 new discovery tests + 171 pre-existing), `make ci` green
+- 45 source files pass mypy --strict, 77 files pass ruff check/format
+- Key modules created:
+  - Infrastructure: github_client.py (16 tests), graphql_client.py (13 tests), pool.py (13 tests)
+  - Channels: search_channel.py (11), curated_channel.py (17), code_search_channel.py (13), registry_channel.py (30), dependency_channel.py (25), seed_expansion.py (25)
+  - Integration: orchestrator.py (15 tests), types.py, __init__.py exports
+- Key decisions documented:
+  - _BearerAuth uses Generator not Iterator for httpx.Auth compatibility
+  - HTTP status codes as named constants (PLR2004 compliance)
+  - contextlib.suppress replaces try/except/pass (SIM105)
+  - Pydantic models need runtime imports (# noqa: TC001, not TYPE_CHECKING)
+  - CandidatePool.total_count is @property, not constructor param
+  - DiscoveryChannel.AWESOME_LIST (not CURATED) is the enum for curated channel
+  - SeedExpansion.expand() takes seed_urls, not DiscoveryQuery — orchestrator special-cases
+  - Discovery scoring: base + breadth bonus + channel quality bonuses, capped at 1.0
+- Updated wiki/patterns/phase2-discovery-plan.md with complete implementation record
+- Updated wiki/index.md with completion status
