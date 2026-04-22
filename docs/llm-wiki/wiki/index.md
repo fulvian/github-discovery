@@ -1,0 +1,31 @@
+# Knowledge Base Index
+
+<!-- AUTO-GENERATED: This index is maintained by the LLM. Do not edit manually unless fixing errors. -->
+<!-- Format: - [Title](path) — one-line summary | Updated: YYYY-MM-DD -->
+
+## Architecture
+
+- [Tiered Scoring Pipeline](architecture/tiered-pipeline.md) — 4-gate progressive pipeline: discovery → metadata screening → static/security screening → LLM deep assessment → ranking | Updated: 2026-04-22
+- [MCP-Native Agentic Integration Architecture](architecture/mcp-native-design.md) — MCP-first design principles, progressive deepening, session-aware tools, agent workflows | Updated: 2026-04-22
+- [Anti-Star Bias Philosophy](architecture/anti-star-bias.md) — Value Score formula, intra-domain ranking, star independence rationale | Updated: 2026-04-22
+- [Option C Hybrid Architecture Decision](architecture/option-c-hybrid.md) — Architecture decision: API+Worker+MCP native+CLI hybrid, now evolved to MCP-native | Updated: 2026-04-22
+
+## APIs
+
+- [MCP Tool Specifications](apis/mcp-tools.md) — Complete specification of all MCP tools: discovery, screening, assessment, ranking, session management | Updated: 2026-04-22
+- [GitHub API Patterns and Constraints](apis/github-api-patterns.md) — REST/GraphQL API usage patterns, rate limits, pagination, MCP composition | Updated: 2026-04-22
+
+## Domain
+
+- [Scoring Dimensions and Weight Profiles](domain/scoring-dimensions.md) — 8 evaluation dimensions, domain-dependent weights, confidence scores, Value Score computation | Updated: 2026-04-22
+- [Discovery Channels and Strategies](domain/discovery-channels.md) — 6 discovery channels: Search, Code Search, Dependency, Registry, Awesome Lists, Seed Expansion | Updated: 2026-04-22
+- [Screening Gates Detail](domain/screening-gates.md) — Gate 1 metadata sub-scores, Gate 2 static/security sub-scores, tool integrations, hard gate enforcement | Updated: 2026-04-22
+- [Competitive Landscape and Gap Analysis](domain/competitive-landscape.md) — Existing projects (github_repo_classifier, CHAOSS, OpenSSF, etc.) and the gap GitHub Discovery fills | Updated: 2026-04-22
+- [Domain Strategy and Repository Taxonomy](domain/domain-strategy.md) — Domain taxonomy (CLI, web_framework, data_tool, etc.), domain-specific weights and thresholds | Updated: 2026-04-22
+
+## Patterns
+
+- [Session Workflow and Progressive Deepening](patterns/session-workflow.md) — Cross-session progressive deepening, session state, context compaction, progress notifications | Updated: 2026-04-22
+- [Agent Workflow Patterns](patterns/agent-workflows.md) — MCP prompt skills, standard agent workflow, CLI patterns, permission/security models | Updated: 2026-04-22
+- [Technology Stack Decisions](patterns/tech-stack.md) — Verified tech stack (Python 3.12+, FastAPI, Pydantic v2, httpx, MCP SDK), integrations, coding conventions | Updated: 2026-04-22
+- [Operational Rules and Workflow Standards](patterns/operational-rules.md) — Guiding principles, hard architecture constraints, error handling standards | Updated: 2026-04-22
