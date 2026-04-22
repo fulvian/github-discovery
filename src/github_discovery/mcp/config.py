@@ -1,7 +1,8 @@
-"""GitHub Discovery MCP configuration (GHDISC_MCP_* settings).
+"""GitHub Discovery MCP configuration.
 
-MCP-specific settings extracted from the root Settings module.
-Shares the same pydantic-settings config pattern with GHDISC_MCP_ prefix.
+MCP settings are defined in :mod:`github_discovery.config` as ``MCPSettings``
+(accessed via ``Settings.mcp``). This module will contain MCP-specific
+configuration helpers and runtime setup when Phase 7 is implemented.
 """
 
 from __future__ import annotations

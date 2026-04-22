@@ -284,6 +284,24 @@ DEVOPS_PROFILE = DomainProfile(
     preferred_channels=["search", "dependency", "registry"],
 )
 
+BACKEND_PROFILE = DomainProfile(
+    domain_type=DomainType.BACKEND,
+    display_name="Backend Service",
+    description="Backend services and server-side applications",
+    dimension_weights={
+        ScoreDimension.CODE_QUALITY: 0.15,
+        ScoreDimension.ARCHITECTURE: 0.20,
+        ScoreDimension.TESTING: 0.15,
+        ScoreDimension.DOCUMENTATION: 0.10,
+        ScoreDimension.MAINTENANCE: 0.15,
+        ScoreDimension.SECURITY: 0.15,
+        ScoreDimension.FUNCTIONALITY: 0.05,
+        ScoreDimension.INNOVATION: 0.05,
+    },
+    star_baseline=1500.0,
+    preferred_channels=["search", "registry", "dependency"],
+)
+
 DEFAULT_PROFILE = DomainProfile(
     domain_type=DomainType.OTHER,
     display_name="Other",
@@ -305,6 +323,7 @@ DOMAIN_PROFILES: dict[DomainType, DomainProfile] = {
     DomainType.LIBRARY: LIBRARY_PROFILE,
     DomainType.CLI: CLI_PROFILE,
     DomainType.DEVOPS_TOOL: DEVOPS_PROFILE,
+    DomainType.BACKEND: BACKEND_PROFILE,
     # All other domains use DEFAULT_PROFILE
 }
 

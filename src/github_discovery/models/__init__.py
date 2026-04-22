@@ -58,6 +58,7 @@ from github_discovery.models.mcp_spec import (
     WorkflowStep,
 )
 from github_discovery.models.scoring import (
+    BACKEND_PROFILE,
     CLI_PROFILE,
     DEFAULT_PROFILE,
     DEVOPS_PROFILE,
@@ -95,6 +96,7 @@ from github_discovery.models.session import (
 
 __all__ = [
     # Scoring (Layer D)
+    "BACKEND_PROFILE",
     "CLI_PROFILE",
     # MCP Spec
     "DEEP_ASSESS_SPEC",

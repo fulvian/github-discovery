@@ -17,6 +17,7 @@ class DomainType(StrEnum):
     DATA_TOOL = "data_tool"
     LIBRARY = "library"
     ML_LIB = "ml_lib"
+    BACKEND = "backend"
     DEVOPS_TOOL = "devops_tool"
     SECURITY_TOOL = "security_tool"
     LANG_TOOL = "lang_tool"

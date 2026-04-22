@@ -132,9 +132,14 @@ Predefined weight profiles for domain-specific scoring:
 - `LIBRARY_PROFILE`: balanced, docs 15%
 - `CLI_PROFILE`: testing 20%, maintenance 20%
 - `DEVOPS_PROFILE`: testing 20%, security 15%
+- `BACKEND_PROFILE`: architecture 20%, security 15%
 - `DEFAULT_PROFILE`: Blueprint §7 default weights
 
 All profiles validated: dimension weights sum to 1.0.
+
+### DomainType (Gap Analysis Fix)
+
+Blueprint §10 specifies 8 domain types including `backend`. The initial implementation had 11 types (CLI, web_framework, data_tool, library, ml_lib, devops_tool, security_tool, lang_tool, test_tool, doc_tool, other) but was missing `backend`. Fixed by adding `BACKEND = "backend"` to the DomainType enum and creating `BACKEND_PROFILE` with architecture-weighted scoring (20% architecture).
 
 ### Feature Store Contract
 

@@ -6,6 +6,7 @@ from math import log10
 
 from github_discovery.models.enums import DomainType, ScoreDimension
 from github_discovery.models.scoring import (
+    BACKEND_PROFILE,
     CLI_PROFILE,
     DEFAULT_PROFILE,
     DEVOPS_PROFILE,
@@ -97,12 +98,23 @@ class TestDomainProfile:
         """get_domain_profile returns correct profile."""
         assert get_domain_profile(DomainType.LIBRARY) is LIBRARY_PROFILE
         assert get_domain_profile(DomainType.OTHER) is DEFAULT_PROFILE
+        assert get_domain_profile(DomainType.BACKEND) is BACKEND_PROFILE
         # Unknown domain returns default
         assert get_domain_profile(DomainType.ML_LIB) is DEFAULT_PROFILE
 
     def test_devops_profile_weights_sum_to_one(self) -> None:
         """DevOps profile weights sum to 1.0."""
         assert DEVOPS_PROFILE.validate_weights() is True
+
+    def test_backend_profile_weights_sum_to_one(self) -> None:
+        """Backend profile weights sum to 1.0."""
+        assert BACKEND_PROFILE.validate_weights() is True
+
+    def test_backend_architecture_weight_higher(self) -> None:
+        """Backend profile weights architecture higher than default."""
+        backend_arch = BACKEND_PROFILE.dimension_weights[ScoreDimension.ARCHITECTURE]
+        default_arch = DEFAULT_PROFILE.dimension_weights[ScoreDimension.ARCHITECTURE]
+        assert backend_arch > default_arch
 
 
 class TestRankedRepo:

@@ -128,3 +128,15 @@
 - `make ci` green: ruff + mypy --strict + pytest
 - Key issues resolved: computed_field mypy prop-decorator, TestFootprintScore pytest collection, model_validate for constraints, Makefile venv python
 - Updated wiki/index.md with completion status
+
+## [2026-04-22] ingest | Phase 0+1 Gap Analysis and Fixes
+- Compared actual implementation against Roadmap Phase 0 (tasks 0.1-0.11) and Phase 1 (tasks 1.1-1.9)
+- Context7 verification of Pydantic, pydantic-settings, structlog, MCP Python SDK before analysis
+- Issues found and fixed:
+  - CRITICAL: Missing __main__.py — `python -m github_discovery` was broken. Created entry point.
+  - MEDIUM: Stale ruff ignores (ANN101, ANN102 removed in ruff 0.8+). Removed from pyproject.toml.
+  - MEDIUM: Missing 'backend' DomainType from Blueprint §10. Added to enums.py + BACKEND_PROFILE in scoring.py.
+  - MEDIUM: mypy unused overrides warning. Removed `[[tool.mypy.overrides]]` for mcp/respx (now have py.typed).
+  - LOW: mcp/config.py was an empty stub duplicating config.py:MCPSettings. Added clarifying docstring.
+- After fixes: `make ci` green — 0 lint errors, 0 typecheck errors, 142 tests passed (2 new)
+- Verified: `python -m github_discovery` and `python -m github_discovery --help` work correctly

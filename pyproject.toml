@@ -83,8 +83,6 @@ ignore = [
     "D203",    # one-blank-line-before-class (conflict with D211)
     "D213",    # multi-line-summary-second-line (conflict with D212)
     "PLR0913", # Too many arguments (common in API models)
-    "ANN101",  # Missing type annotation for self (unnecessary)
-    "ANN102",  # Missing type annotation for cls (unnecessary)
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -118,10 +116,6 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unreachable = true
 extra_checks = true
-
-[[tool.mypy.overrides]]
-module = ["mcp.*", "respx.*", "typer.*"]
-ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 minversion = "8.0"

@@ -96,6 +96,7 @@ GitHubDiscoveryError (base, with context dict)
 - **Target**: Python 3.12
 - **Rule selection**: E, W, F, I, UP, B, SIM, TCH, RUF, C4, ERA, PL, PTH, A, ANN, D, S, T20
 - **Key ignores**: D100 (module docstrings), D104 (package docstrings), D203/D213 (conflicts), PLR0913 (many args)
+- **Note**: ANN101/ANN102 (self/cls annotations) were removed from the ignore list because these rules were removed in ruff 0.8+ (automatic detection)
 - **Per-file**: Tests ignore S101, D, ANN, PLR2004; `__init__.py` ignores F401
 - **isort**: `required-imports = ["from __future__ import annotations"]`, `known-first-party = ["github_discovery"]`
 - **pydocstyle**: Google convention
@@ -104,7 +105,7 @@ GitHubDiscoveryError (base, with context dict)
 ### mypy Configuration
 
 - **Mode**: `strict = true` with `extra_checks = true`
-- **Overrides**: `mcp.*`, `respx.*`, `typer.*` have `ignore_missing_imports = true` (no stable stubs yet)
+- **No overrides needed**: `mcp` and `respx` packages now ship `py.typed` markers, so `ignore_missing_imports` is no longer required (removed in gap analysis fix)
 
 ### pytest Configuration
 

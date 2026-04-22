@@ -22,6 +22,7 @@ class TestDomainType:
             "data_tool",
             "library",
             "ml_lib",
+            "backend",
             "devops_tool",
             "security_tool",
             "lang_tool",
