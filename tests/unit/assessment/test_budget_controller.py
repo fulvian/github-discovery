@@ -277,7 +277,7 @@ class TestAutoResetOnDayChange:
 
         with patch("github_discovery.assessment.budget_controller.date") as mock_date:
             mock_date.today.return_value = tomorrow
-            mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
+            mock_date.side_effect = date
             # Trigger _today_key which detects day change
             key = controller._today_key()
 

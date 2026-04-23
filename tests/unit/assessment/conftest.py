@@ -4,22 +4,22 @@ from __future__ import annotations
 
 import pytest
 
-from github_discovery.config import Settings
-from github_discovery.models.candidate import RepoCandidate
-from github_discovery.models.enums import DiscoveryChannel, DomainType, ScoreDimension
-from github_discovery.models.screening import (
-    HygieneScore,
-    MetadataScreenResult,
-    ScreeningResult,
-    StaticScreenResult,
-)
 from github_discovery.assessment.types import (
     HeuristicScores,
     LLMBatchOutput,
     LLMDimensionOutput,
     RepoContent,
 )
+from github_discovery.config import Settings
 from github_discovery.models.assessment import TokenUsage
+from github_discovery.models.candidate import RepoCandidate
+from github_discovery.models.enums import DiscoveryChannel, ScoreDimension
+from github_discovery.models.screening import (
+    HygieneScore,
+    MetadataScreenResult,
+    ScreeningResult,
+    StaticScreenResult,
+)
 
 
 @pytest.fixture

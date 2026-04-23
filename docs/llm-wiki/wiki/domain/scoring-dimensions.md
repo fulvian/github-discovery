@@ -3,7 +3,7 @@ Title: Scoring Dimensions and Weight Profiles
 Topic: domain
 Sources: Foundation Blueprint §7, §10; Roadmap Phase 3-5
 Raw: [blueprint.md](../../../foundation/github-discovery_foundation_blueprint.md); [roadmap.md](../../../roadmaps/github-discovery_foundation_roadmap.md)
-Updated: 2026-04-22
+Updated: 2026-04-23
 Confidence: medium
 ---
 
@@ -64,8 +64,20 @@ ValueScore = quality_score / log10(star_count + 10)
 
 Where `quality_score` is the domain-weighted composite of assessed dimensions. See [Anti-Star Bias](../architecture/anti-star-bias.md).
 
+## Implementation Status
+
+**Phase 5 (Layer D) COMPLETE**: The scoring engine is fully implemented in `src/github_discovery/scoring/`. Key implementation modules:
+- `engine.py` — ScoringEngine combining Gate 1+2+3 into composite multi-dimensional scores
+- `profiles.py` — ProfileRegistry with 11 domain profiles (7 new in Phase 5: WEB_FRAMEWORK, DATA_TOOL, ML_LIB, SECURITY_TOOL, LANG_TOOL, TEST_TOOL, DOC_TOOL)
+- `value_score.py` — ValueScoreCalculator implementing `quality_score / log10(stars + 10)` with hidden gem detection
+- `confidence.py` — ConfidenceCalculator with per-dimension confidence and gate coverage bonus
+- `ranker.py` — Ranker with intra-domain ranking and deterministic tie-breaking
+
+See [Phase 5 Implementation](../patterns/phase5-scoring-implementation.md) for full details.
+
 ## See Also
 
 - [Anti-Star Bias](../architecture/anti-star-bias.md)
 - [Tiered Pipeline](../architecture/tiered-pipeline.md)
 - [Screening Gates Detail](screening-gates.md)
+- [Phase 5 Implementation](../patterns/phase5-scoring-implementation.md)

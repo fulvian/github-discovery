@@ -28,7 +28,7 @@ def _make_provider() -> LLMProvider:
         mock_instructor.from_openai.return_value = mock_client
 
         provider = LLMProvider(
-            api_key="test-key",  # noqa: S106
+            api_key="test-key",
             base_url="https://test.api/v1",
             model="gpt-4o",
         )

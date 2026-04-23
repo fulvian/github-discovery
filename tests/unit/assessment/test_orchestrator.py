@@ -6,8 +6,7 @@ and the full assessment pipeline with mocked dependencies.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -265,7 +264,7 @@ class TestCacheBehavior:
         """Cache uses full_name:commit_sha as key."""
         orchestrator = _make_orchestrator()
         candidate_v1 = _make_candidate(commit_sha="sha1")
-        candidate_v2 = _make_candidate(commit_sha="sha2")
+        _candidate_v2 = _make_candidate(commit_sha="sha2")
         screening = _make_screening_passed()
 
         repo_content = _make_repo_content()
@@ -551,7 +550,7 @@ class TestOrchestratorProperties:
     def test_budget_controller_property(self) -> None:
         """budget_controller returns the internal BudgetController."""
         orchestrator = _make_orchestrator()
-        from github_discovery.assessment.budget_controller import BudgetController
+        from github_discovery.assessment.budget_controller import BudgetController  # noqa: PLC0415
 
         assert isinstance(orchestrator.budget_controller, BudgetController)
 

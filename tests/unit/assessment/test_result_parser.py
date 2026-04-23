@@ -7,8 +7,6 @@ and Gate 3 threshold behavior.
 
 from __future__ import annotations
 
-import pytest
-
 from github_discovery.assessment.result_parser import ResultParser
 from github_discovery.assessment.types import (
     HeuristicScores,

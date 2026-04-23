@@ -128,6 +128,48 @@ class AssessmentSettings(BaseSettings):
     )
 
 
+class ScoringSettings(BaseSettings):
+    """Scoring and ranking settings (Layer D)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="GHDISC_SCORING_",
+        env_file=".env",
+    )
+
+    min_confidence: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence to include in ranking",
+    )
+    hidden_gem_star_threshold: int = Field(
+        default=500,
+        description="Max stars for a repo to be considered 'hidden gem'",
+    )
+    hidden_gem_min_quality: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Min quality_score to qualify as hidden gem",
+    )
+    feature_store_ttl_hours: int = Field(
+        default=48,
+        description="Feature store TTL in hours",
+    )
+    ranking_seed: int = Field(
+        default=42,
+        description="Seed for deterministic tie-breaking in ranking",
+    )
+    cross_domain_warning: bool = Field(
+        default=True,
+        description="Emit warning on cross-domain comparisons",
+    )
+    custom_profiles_path: str = Field(
+        default="",
+        description="Path to YAML file with custom domain profiles",
+    )
+
+
 class MCPSettings(BaseSettings):
     """MCP server settings."""
 
@@ -175,4 +217,5 @@ class Settings(BaseSettings):
     discovery: DiscoverySettings = Field(default_factory=DiscoverySettings)
     screening: ScreeningSettings = Field(default_factory=ScreeningSettings)
     assessment: AssessmentSettings = Field(default_factory=AssessmentSettings)
+    scoring: ScoringSettings = Field(default_factory=ScoringSettings)
     mcp: MCPSettings = Field(default_factory=MCPSettings)

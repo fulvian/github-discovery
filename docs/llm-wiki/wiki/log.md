@@ -268,3 +268,32 @@
   - pydantic: BaseModel, computed_field, model_json_schema(), field_validator
 - Updated wiki/patterns/phase4-assessment-implementation.md with complete implementation record
 - Updated wiki/index.md with completion status
+
+## [2026-04-23] ingest | Phase 5 Scoring & Ranking Implementation Complete
+- All 8 tasks (5.1–5.8) from phase5-implementation-plan.md implemented and verified
+- 810 tests passing (110 new scoring tests + 700 pre-existing), `make ci` green
+- ruff check ✅ | ruff format ✅ | mypy --strict ✅ | pytest 810/810 ✅
+- Source modules created (10 files in scoring/):
+  - types.py: ScoringInput, DimensionScoreInfo, RankingResult, ExplainReport
+  - engine.py: ScoringEngine — composite scoring across Gate 1+2+3
+  - profiles.py: ProfileRegistry — 11 domain weight profiles (4 existing + 7 new)
+  - value_score.py: ValueScoreCalculator — quality_score / log10(stars + 10)
+  - confidence.py: ConfidenceCalculator — per-dimension confidence + gate coverage bonus
+  - ranker.py: Ranker — intra-domain ranking + deterministic tie-breaking + hidden gem identification
+  - cross_domain.py: CrossDomainGuard — min-max normalization + cross-domain warnings
+  - explainability.py: ExplainabilityGenerator — summary/full reports + improvement suggestions
+  - feature_store.py: FeatureStore — SQLite-backed with TTL, CRUD, batch ops
+  - config.py: Added ScoringSettings with GHDISC_SCORING_* env prefix
+- Test files created (9 files in tests/unit/scoring/):
+  - conftest.py, test_types.py (9), test_engine.py (13), test_profiles.py (10)
+  - test_value_score.py (20), test_confidence.py (13), test_ranker.py (13)
+  - test_cross_domain.py (8), test_explainability.py (14), test_feature_store.py (10)
+- Pre-existing ruff issues fixed in Phase 4 tests (PLW0108, F841, PLC0415)
+- Key patterns discovered:
+  - Pydantic models need runtime imports (# noqa: TC001), not TYPE_CHECKING
+  - StrEnum.__members__ returns uppercase names, not values
+  - pytest async yield fixtures need # noqa: ANN001
+- Created wiki/patterns/phase5-scoring-implementation.md
+- Updated wiki/index.md with Phase 5 entry
+- Updated wiki/domain/scoring-dimensions.md with implementation note
+- Updated wiki/architecture/anti-star-bias.md with ValueScoreCalculator note

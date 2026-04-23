@@ -3,7 +3,7 @@ Title: Anti-Star Bias Philosophy
 Topic: architecture
 Sources: Foundation Blueprint §3, §5, §7; Findings §1
 Raw: [blueprint.md](../../../foundation/github-discovery_foundation_blueprint.md); [findings.md](../../../../findings.md)
-Updated: 2026-04-22
+Updated: 2026-04-23
 Confidence: high
 ---
 
@@ -62,6 +62,16 @@ Ranking is performed **within** domain categories, never across:
 ## Origin
 
 The Value Score pattern was first identified in `chriscarrollsmith/github_repo_classifier`, which uses `quality_score / log10(star_count + 10)`. GitHub Discovery adopts and extends this pattern with domain-aware weighting and multi-gate confidence scores.
+
+## Implementation
+
+The Value Score formula is implemented in `src/github_discovery/scoring/value_score.py` as `ValueScoreCalculator`. Key features:
+- Core formula: `quality_score / log10(stars + 10)`
+- Hidden gem detection: repos with value_score > 1.5× median of the set
+- Batch normalization: min-max scaling across repos for relative comparison
+- Also available as `@computed_field` on `ScoreResult` in `models/scoring.py`
+
+See [Phase 5 Implementation](../patterns/phase5-scoring-implementation.md) for full details.
 
 ## See Also
 

@@ -204,3 +204,46 @@
 - `tests/unit/screening/` — 18 new test files
 - `.workflow/state.md` — Updated with Phase 3 completion
 - `progress.md` — This update
+
+## Session: 2026-04-23 (Phase 5 Implementation)
+
+### 13:00 — Phase 5 Scoring & Ranking (Layer D) Complete
+- Implemented all 8 tasks from `docs/plans/phase5-implementation-plan.md`
+- 810 tests passing (110 new scoring tests + 700 pre-existing), `make ci` green
+- ruff check ✅ | ruff format ✅ | mypy --strict ✅ | pytest 810/810 ✅
+
+### Modules Created (10 in `src/github_discovery/scoring/`)
+- **types.py**: ScoringInput, DimensionScoreInfo, RankingResult, ExplainReport
+- **engine.py**: ScoringEngine — composite scoring across Gate 1+2+3 with per-dimension source tracking
+- **profiles.py**: ProfileRegistry — 11 domain weight profiles (4 existing + 7 new: WEB_FRAMEWORK, DATA_TOOL, ML_LIB, SECURITY_TOOL, LANG_TOOL, TEST_TOOL, DOC_TOOL)
+- **value_score.py**: ValueScoreCalculator — anti-star bias formula with hidden gem detection + batch normalization
+- **confidence.py**: ConfidenceCalculator — per-dimension confidence + gate coverage bonus
+- **ranker.py**: Ranker — intra-domain ranking + deterministic tie-breaking + hidden gem identification
+- **cross_domain.py**: CrossDomainGuard — min-max normalization + cross-domain comparison warnings
+- **explainability.py**: ExplainabilityGenerator — summary/full reports + improvement suggestions
+- **feature_store.py**: FeatureStore — SQLite-backed with TTL, CRUD, batch ops, statistics
+- **config.py**: Added ScoringSettings with GHDISC_SCORING_* env prefix
+
+### Test Files Created (10 in `tests/unit/scoring/`)
+- `conftest.py` (shared fixtures), `__init__.py`
+- `test_types.py` (9), `test_engine.py` (13), `test_profiles.py` (10)
+- `test_value_score.py` (20), `test_confidence.py` (13), `test_ranker.py` (13)
+- `test_cross_domain.py` (8), `test_explainability.py` (14), `test_feature_store.py` (10)
+
+### Key Implementation Patterns Discovered
+- Pydantic model fields need runtime imports (# noqa: TC001), NOT TYPE_CHECKING blocks
+- StrEnum.__members__ returns uppercase names (CODE_QUALITY), not values (code_quality)
+- pytest async yield fixtures need # noqa: ANN001 for type annotation conflict
+- mypy strict requires explicit None arguments even with default parameters
+
+### Pre-existing Ruff Issues Fixed
+- `test_budget_controller.py`: PLW0108 unnecessary lambda → direct reference
+- `test_orchestrator.py`: F841 unused variable + PLC0415 misplaced import
+
+### Files Modified
+- `src/github_discovery/scoring/` — 9 new modules + `__init__.py` updated with all exports
+- `src/github_discovery/config.py` — Added ScoringSettings class
+- `tests/unit/scoring/` — 10 new test files
+- `tests/unit/assessment/` — 3 files fixed (pre-existing ruff issues)
+- `docs/llm-wiki/wiki/` — Updated index.md, log.md, scoring-dimensions.md, anti-star-bias.md, new phase5-scoring-implementation.md
+- `progress.md` — This update
