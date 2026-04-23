@@ -105,6 +105,14 @@ class AssessmentSettings(BaseSettings):
         le=10,
         description="Max retries for LLM API calls via instructor",
     )
+    llm_fallback_model: str = Field(
+        default="anthropic/claude-sonnet-4-20250514",
+        description="Fallback model if primary fails",
+    )
+    llm_subscription_mode: bool = Field(
+        default=True,
+        description="Use NanoGPT subscription endpoint",
+    )
 
     # Repomix packing settings
     repomix_max_tokens: int = Field(
@@ -126,6 +134,19 @@ class AssessmentSettings(BaseSettings):
         le=1.0,
         description="Minimum Gate 3 score to pass",
     )
+
+    @property
+    def effective_base_url(self) -> str:
+        """Return subscription or paygo endpoint based on subscription mode.
+
+        When ``llm_subscription_mode`` is True (default), the configured
+        ``nanogpt_base_url`` (subscription endpoint) is returned as-is.
+        When False, the ``/subscription`` path segment is stripped to
+        produce the pay-per-use endpoint.
+        """
+        if self.llm_subscription_mode:
+            return self.nanogpt_base_url
+        return self.nanogpt_base_url.replace("/subscription", "")
 
 
 class ScoringSettings(BaseSettings):

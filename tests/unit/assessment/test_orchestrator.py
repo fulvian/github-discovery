@@ -6,6 +6,7 @@ and the full assessment pipeline with mocked dependencies.
 
 from __future__ import annotations
 
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -201,7 +202,7 @@ class TestCacheBehavior:
             gate3_pass=True,
         )
         cache_key = "test/repo:abc123"
-        orchestrator._cache[cache_key] = cached_result
+        orchestrator._cache[cache_key] = (cached_result, time.monotonic())
 
         context = AssessmentContext(
             candidates=[candidate],
@@ -574,3 +575,97 @@ class TestOrchestratorProperties:
         await orchestrator.close()
 
         mock_provider.close.assert_awaited_once()
+
+
+class TestCacheTTL:
+    """Tests for cache TTL enforcement."""
+
+    async def test_expired_cache_entry_not_returned(self) -> None:
+        """An expired cache entry is evicted and not returned."""
+        orchestrator = _make_orchestrator()
+        candidate = _make_candidate()
+        screening = _make_screening_passed()
+
+        # Pre-populate cache with an expired entry
+        cached_result = DeepAssessmentResult(
+            full_name="test/repo",
+            commit_sha="abc123",
+            overall_quality=0.85,
+            gate3_pass=True,
+        )
+        cache_key = "test/repo:abc123"
+        # Set timestamp far in the past (beyond default 24h TTL)
+        expired_time = time.monotonic() - (25 * 3600)
+        orchestrator._cache[cache_key] = (cached_result, expired_time)
+
+        repo_content = _make_repo_content()
+        heuristic_scores = _make_heuristic_scores()
+        orchestrator._repomix.pack = AsyncMock(return_value=repo_content)  # type: ignore[assignment]
+        orchestrator._heuristic.analyze = MagicMock(return_value=heuristic_scores)  # type: ignore[assignment]
+
+        mock_provider = AsyncMock()
+        mock_provider.assess_batch = AsyncMock(
+            return_value=LLMBatchOutput(
+                dimensions={
+                    dim.value: LLMDimensionOutput(score=0.7, confidence=0.8)
+                    for dim in ScoreDimension
+                },
+                overall_explanation="Fresh assessment.",
+            ),
+        )
+        mock_provider.last_token_usage = TokenUsage(total_tokens=500)
+        orchestrator._provider = mock_provider
+
+        context = AssessmentContext(
+            candidates=[candidate],
+            screening_results={"test/repo": screening},
+        )
+
+        result = await orchestrator._assess_candidate(
+            candidate,
+            screening,
+            context=context,
+        )
+
+        # Should NOT be cached — expired entry was evicted
+        assert result.cached is False
+        # The expired entry should have been removed
+        assert cache_key not in orchestrator._cache or (
+            orchestrator._cache[cache_key][1] > expired_time
+        )
+
+    async def test_fresh_cache_entry_returned(self) -> None:
+        """A fresh cache entry (within TTL) is returned as cached."""
+        orchestrator = _make_orchestrator()
+        candidate = _make_candidate()
+        screening = _make_screening_passed()
+
+        cached_result = DeepAssessmentResult(
+            full_name="test/repo",
+            commit_sha="abc123",
+            overall_quality=0.85,
+            gate3_pass=True,
+        )
+        cache_key = "test/repo:abc123"
+        # Set timestamp to now (within TTL)
+        orchestrator._cache[cache_key] = (cached_result, time.monotonic())
+
+        context = AssessmentContext(
+            candidates=[candidate],
+            screening_results={"test/repo": screening},
+        )
+
+        result = await orchestrator._assess_candidate(
+            candidate,
+            screening,
+            context=context,
+        )
+
+        assert result.cached is True
+        assert result.overall_quality == 0.85
+
+    def test_cache_ttl_uses_settings(self) -> None:
+        """Cache TTL is initialized from assessment settings."""
+        orchestrator = _make_orchestrator()
+        # Default is 24 hours = 86400 seconds
+        assert orchestrator._cache_ttl_seconds == 86400.0

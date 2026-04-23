@@ -247,3 +247,42 @@
 - `tests/unit/assessment/` — 3 files fixed (pre-existing ruff issues)
 - `docs/llm-wiki/wiki/` — Updated index.md, log.md, scoring-dimensions.md, anti-star-bias.md, new phase5-scoring-implementation.md
 - `progress.md` — This update
+
+## Session: 2026-04-23 (Phase 4+5 Post-Implementation Verification)
+
+### 14:00 — Deep Analysis and Bug Fixes
+- Systematic analysis of all Phase 4 (assessment/) and Phase 5 (scoring/) modules
+- 25+ issues identified across both phases; all fixed
+- 863 tests passing (53 new), `make ci` green: ruff + mypy --strict + pytest
+
+### Phase 4 Fixes Applied
+1. **Cache TTL enforcement (Issue #1)**: `orchestrator._cache` changed from `dict[str, DeepAssessmentResult]` → `dict[str, tuple[DeepAssessmentResult, float]]` with `time.monotonic()` timestamps. Expired entries are evicted on read. `_cache_ttl_seconds` from `AssessmentSettings.cache_ttl_hours`.
+2. **Domain-specific prompt adjustments (Issue #3)**: `get_prompt()` now accepts `domain: DomainType | None`. Added `_DOMAIN_FOCUS` registry with 10 entries: CLI+code_quality, CLI+testing, ML_LIB+innovation, ML_LIB+functionality, SECURITY_TOOL+security, DEVOPS_TOOL+maintenance, DEVOPS_TOOL+testing, LANG_TOOL+code_quality, LANG_TOOL+testing, DATA_TOOL+testing, DATA_TOOL+documentation.
+3. **Prompt tests (Issue #2)**: Created `tests/unit/assessment/test_prompts/` with 26 tests — registry completeness, content structure, domain focus behavior.
+4. **repomix_adapter.py**: Added `timeout_seconds=120` with `asyncio.wait_for()`. Fixed `total_tokens` inflation after truncation.
+5. **orchestrator.py**: Added pre-pack budget check. Fixed `gate_passed` derivation in hard gate error.
+6. **llm_provider.py**: Added fallback model retry. Safe `close()` with try/except.
+7. **config.py**: Added `llm_fallback_model`, `llm_subscription_mode`, `effective_base_url`.
+8. **lang_analyzers/**: Created new module (base.py, python_analyzer.py) + 15 tests.
+
+### Phase 5 Fixes Applied
+1. **FeatureStore get_batch key collision**: Changed from `dict[str, ...]` → `dict[tuple[str, str], ...]`.
+2. **ScoringEngine ↔ FeatureStore integration (Issue #4)**: Added `store: FeatureStore | None` to constructor. New `async score_cached()` — checks store before computing, writes back after. Sync `score()` unchanged.
+3. **Ranker ranking_seed consumption (Issue #5)**: `_sort_key()` uses 4-tuple with `hash((ranking_seed, full_name))` for deterministic but seed-dependent tie-breaking.
+4. **types.py**: Added `profile_override: DomainProfile | None` to `ScoringContext`.
+5. **Dead code removed**: value_score.py (unreachable branch), confidence.py (redundant check), cross_domain.py (unused method).
+
+### Test Files Changed
+- `tests/unit/assessment/test_orchestrator.py` — Updated cache test (tuple), added 3 TTL tests
+- `tests/unit/assessment/test_prompts/test_dimension_prompts.py` — NEW: 26 tests
+- `tests/unit/assessment/test_prompts/__init__.py` — NEW
+- `tests/unit/scoring/test_engine.py` — Added 7 FeatureStore integration tests
+- `tests/unit/scoring/test_ranker.py` — Added 3 ranking_seed tests
+
+### Files Modified
+- `src/github_discovery/assessment/orchestrator.py` — Cache TTL enforcement
+- `src/github_discovery/assessment/prompts/__init__.py` — Domain-specific focus adjustments
+- `src/github_discovery/scoring/engine.py` — FeatureStore integration + async score_cached()
+- `src/github_discovery/scoring/ranker.py` — Seeded hash tie-breaking
+- `docs/llm-wiki/wiki/` — Updated phase4, phase5, index.md, log.md
+- `progress.md` — This update

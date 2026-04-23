@@ -36,15 +36,18 @@ class RepomixAdapter:
         *,
         max_tokens: int = 40_000,
         compression: bool = True,
+        timeout_seconds: int = 120,
     ) -> None:
         """Initialize the adapter.
 
         Args:
             max_tokens: Maximum token budget for packed content.
             compression: Whether to enable interface-mode compression.
+            timeout_seconds: Timeout for repomix processing in seconds.
         """
         self._max_tokens = max_tokens
         self._compression = compression
+        self._timeout = timeout_seconds
 
     async def pack(self, repo_url: str, full_name: str) -> RepoContent:
         """Pack a repository into LLM-friendly content.
@@ -71,10 +74,20 @@ class RepomixAdapter:
 
         try:
             processor = RepoProcessor(repo_url, config=config)
-            result = await asyncio.to_thread(
-                processor.process,
-                False,  # write_output
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    processor.process,
+                    False,  # write_output
+                ),
+                timeout=self._timeout,
             )
+        except TimeoutError as exc:
+            raise AssessmentError(
+                f"Repomix packing timed out for {full_name} (limit {self._timeout}s)",
+                repo_url=repo_url,
+            ) from exc
+        except AssessmentError:
+            raise
         except Exception as exc:
             raise AssessmentError(
                 f"Repomix packing failed for {full_name}: {exc}",
@@ -99,17 +112,23 @@ class RepomixAdapter:
         )
 
         if was_truncated:
+            # Estimate truncated token count to avoid inflating downstream
+            # budget checks with the original (pre-truncation) count.
+            effective_tokens = len(truncated_content) // _CHARS_PER_TOKEN
             log.warning(
                 "content_truncated",
                 original_tokens=total_tokens,
+                estimated_tokens=effective_tokens,
                 max_tokens=self._max_tokens,
             )
+        else:
+            effective_tokens = total_tokens
 
         return RepoContent(
             full_name=full_name,
             content=truncated_content,
             total_files=total_files,
-            total_tokens=total_tokens,
+            total_tokens=effective_tokens,
             total_chars=total_chars,
             compressed=self._compression,
             truncated=was_truncated,

@@ -297,3 +297,26 @@
 - Updated wiki/index.md with Phase 5 entry
 - Updated wiki/domain/scoring-dimensions.md with implementation note
 - Updated wiki/architecture/anti-star-bias.md with ValueScoreCalculator note
+
+## [2026-04-23] ingest | Phase 4+5 Post-Implementation Verification
+- Deep analysis of all assessment + scoring modules against blueprint §6-§7, §10, §16.5
+- 25+ issues identified across Phase 4+5; all fixed
+- 863 total tests passing (was 810), `make ci` green: ruff + mypy --strict + pytest
+- Phase 4 fixes:
+  - Cache TTL enforcement: _cache now tuple with timestamps, expired entries evicted (Issue #1)
+  - Domain-specific prompt adjustments: _DOMAIN_FOCUS registry with 10 domain+dimension pairs (Issue #3)
+  - Prompt test coverage: 26 new tests for all 8 dimension prompts (Issue #2)
+  - repomix timeout + token inflation fix
+  - orchestrator pre-pack budget check + gate_passed derivation fix
+  - llm_provider fallback model retry
+  - lang_analyzers module created (Task 4.6 — was 0%)
+- Phase 5 fixes:
+  - FeatureStore get_batch key collision fix (dict[tuple[str,str],...] instead of dict[str,...])
+  - ScoringEngine ↔ FeatureStore integration: optional store + async score_cached() (Issue #4)
+  - Ranker ranking_seed consumption: seeded hash tie-breaking 4-tuple (Issue #5)
+  - ScoringContext profile_override added
+  - Dead code removed (value_score, confidence, cross_domain)
+- Updated wiki/patterns/phase4-assessment-implementation.md with verification details
+- Updated wiki/patterns/phase5-scoring-implementation.md with verification details
+- Updated wiki/index.md with revised test counts
+- Updated progress.md with verification session details

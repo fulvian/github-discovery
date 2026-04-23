@@ -77,17 +77,19 @@ class AssessmentOrchestrator:
             max_tokens_per_day=self._assessment_settings.max_tokens_per_day,
         )
         self._provider: LLMProvider | None = None
-        self._cache: dict[str, DeepAssessmentResult] = {}
+        self._cache: dict[str, tuple[DeepAssessmentResult, float]] = {}
+        self._cache_ttl_seconds: float = self._assessment_settings.cache_ttl_hours * 3600.0
 
     async def _ensure_provider(self) -> LLMProvider:
         """Lazily initialize the LLM provider."""
         if self._provider is None:
             self._provider = LLMProvider(
                 api_key=self._assessment_settings.nanogpt_api_key,
-                base_url=self._assessment_settings.nanogpt_base_url,
+                base_url=self._assessment_settings.effective_base_url,
                 model=self._assessment_settings.llm_model,
                 temperature=self._assessment_settings.llm_temperature,
                 max_retries=self._assessment_settings.llm_max_retries,
+                fallback_model=self._assessment_settings.llm_fallback_model,
             )
         return self._provider
 
@@ -172,16 +174,26 @@ class AssessmentOrchestrator:
         # Step 2: Cache check
         cache_key = f"{full_name}:{candidate.commit_sha}"
         if cache_key in self._cache:
-            log.info("assessment_cache_hit")
-            cached_result = self._cache[cache_key]
-            data = cached_result.model_dump()
-            data["cached"] = True
-            return DeepAssessmentResult(**data)
+            cached_result, cached_at = self._cache[cache_key]
+            if time.monotonic() - cached_at < self._cache_ttl_seconds:
+                log.info("assessment_cache_hit")
+                data = cached_result.model_dump()
+                data["cached"] = True
+                return DeepAssessmentResult(**data)
+            # TTL expired — evict stale entry
+            del self._cache[cache_key]
+            log.debug("assessment_cache_expired", cache_key=cache_key)
 
         # Step 3: Budget check
         self._budget.check_daily_budget(full_name)
 
         try:
+            # Step 3b: Pre-pack budget check using repomix_max_tokens estimate
+            self._budget.check_repo_budget(
+                full_name,
+                self._assessment_settings.repomix_max_tokens,
+            )
+
             # Step 4: Repomix pack
             repo_content = await self._repomix.pack(
                 candidate.html_url,
@@ -223,8 +235,8 @@ class AssessmentOrchestrator:
                     full_name=full_name,
                 )
 
-            # Cache the result
-            self._cache[cache_key] = result
+            # Cache the result with current timestamp
+            self._cache[cache_key] = (result, time.monotonic())
 
             log.info(
                 "assessment_complete",
@@ -353,10 +365,18 @@ class AssessmentOrchestrator:
         Gate 1+2 threshold.
         """
         if screening is None or not screening.can_proceed_to_gate3:
+            # Derive actual gate_passed from screening result
+            gate_passed = 0
+            if screening is not None:
+                if screening.gate2 is not None and screening.gate2.gate2_pass:
+                    gate_passed = 2
+                elif screening.gate1 is not None and screening.gate1.gate1_pass:
+                    gate_passed = 1
+
             raise HardGateViolationError(
                 f"Gate 3 blocked for {full_name}: Gate 1+2 must pass before deep assessment",
                 repo_url=full_name,
-                gate_passed=0,
+                gate_passed=gate_passed,
                 gate_required=2,
             )
 

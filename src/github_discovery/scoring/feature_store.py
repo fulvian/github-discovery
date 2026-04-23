@@ -144,49 +144,51 @@ class FeatureStore:
     async def get_batch(
         self,
         keys: list[tuple[str, str]],
-    ) -> dict[str, ScoreResult | None]:
+    ) -> dict[tuple[str, str], ScoreResult | None]:
         """Get multiple cached results at once.
 
         Args:
             keys: List of (full_name, commit_sha) tuples.
 
         Returns:
-            Dict keyed by full_name with ScoreResult or None.
+            Dict keyed by (full_name, commit_sha) tuple with ScoreResult or None.
         """
-        results: dict[str, ScoreResult | None] = {}
+        results: dict[tuple[str, str], ScoreResult | None] = {}
         for full_name, commit_sha in keys:
-            results[full_name] = await self.get(full_name, commit_sha)
+            results[(full_name, commit_sha)] = await self.get(full_name, commit_sha)
         return results
 
     async def put_batch(self, results: list[ScoreResult]) -> None:
-        """Store multiple results at once."""
+        """Store multiple results at once using a single transaction."""
         db = await self._get_db()
-        for result in results:
-            dim_json = self._serialize_dimensions(result.dimension_scores)
-            await db.execute(
-                """
-                INSERT OR REPLACE INTO score_features
-                    (full_name, commit_sha, domain, quality_score, value_score,
-                     confidence, stars, gate1_total, gate2_total, gate3_available,
-                     dimension_scores, scored_at, ttl_hours)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    result.full_name,
-                    result.commit_sha,
-                    result.domain.value,
-                    result.quality_score,
-                    result.value_score,
-                    result.confidence,
-                    result.stars,
-                    result.gate1_total,
-                    result.gate2_total,
-                    1 if result.gate3_available else 0,
-                    dim_json,
-                    result.scored_at.isoformat(),
-                    self._ttl_hours,
-                ),
+        rows = [
+            (
+                result.full_name,
+                result.commit_sha,
+                result.domain.value,
+                result.quality_score,
+                result.value_score,
+                result.confidence,
+                result.stars,
+                result.gate1_total,
+                result.gate2_total,
+                1 if result.gate3_available else 0,
+                self._serialize_dimensions(result.dimension_scores),
+                result.scored_at.isoformat(),
+                self._ttl_hours,
             )
+            for result in results
+        ]
+        await db.executemany(
+            """
+            INSERT OR REPLACE INTO score_features
+                (full_name, commit_sha, domain, quality_score, value_score,
+                 confidence, stars, gate1_total, gate2_total, gate3_available,
+                 dimension_scores, scored_at, ttl_hours)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
         await db.commit()
 
     async def delete(self, full_name: str, commit_sha: str) -> bool:

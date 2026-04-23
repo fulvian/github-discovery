@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+
+import pytest
+
 from github_discovery.models.enums import DomainType, ScoreDimension
 from github_discovery.models.scoring import ScoreResult
+from github_discovery.scoring.engine import ScoringEngine
+from github_discovery.scoring.feature_store import FeatureStore
 from github_discovery.scoring.types import ScoringInput
 from tests.unit.scoring.conftest import (
     _make_assessment_result,
@@ -133,3 +139,93 @@ class TestScoringEngine:
 
         assert result_screen.confidence > result_none.confidence
         assert result_all.confidence > result_screen.confidence
+
+
+class TestScoringEngineFeatureStoreIntegration:
+    """Tests for ScoringEngine + FeatureStore caching integration."""
+
+    @pytest.fixture
+    async def feature_store(self) -> AsyncGenerator[FeatureStore, None]:
+        """In-memory FeatureStore for testing."""
+        store = FeatureStore(db_path=":memory:", ttl_hours=48)
+        await store.initialize()
+        yield store
+        await store.close()
+
+    async def test_score_cached_returns_fresh_when_no_store(
+        self,
+        scoring_engine: ScoringEngine,
+    ) -> None:
+        """score_cached without a store behaves like score()."""
+        candidate = _make_candidate()
+        result = await scoring_engine.score_cached(candidate)
+        assert isinstance(result, ScoreResult)
+        assert result.full_name == "test/repo"
+
+    async def test_score_cached_stores_result(
+        self,
+        scoring_engine: ScoringEngine,
+        feature_store: FeatureStore,
+    ) -> None:
+        """score_cached stores the result in the FeatureStore."""
+        engine = ScoringEngine(store=feature_store)
+        candidate = _make_candidate()
+
+        result = await engine.score_cached(candidate)
+
+        assert isinstance(result, ScoreResult)
+        # Verify it was stored
+        cached = await feature_store.get(candidate.full_name, candidate.commit_sha)
+        assert cached is not None
+        assert cached.full_name == candidate.full_name
+        assert cached.quality_score == result.quality_score
+
+    async def test_score_cached_returns_cached_on_second_call(
+        self,
+        feature_store: FeatureStore,
+    ) -> None:
+        """Second call to score_cached returns the cached result."""
+        engine = ScoringEngine(store=feature_store)
+        candidate = _make_candidate()
+
+        result1 = await engine.score_cached(candidate)
+        result2 = await engine.score_cached(candidate)
+
+        assert result1.quality_score == result2.quality_score
+        assert result1.full_name == result2.full_name
+
+    async def test_score_cached_without_commit_sha_skips_store(
+        self,
+        feature_store: FeatureStore,
+    ) -> None:
+        """score_cached with empty commit_sha skips store operations."""
+        engine = ScoringEngine(store=feature_store)
+        candidate = _make_candidate(commit_sha="")
+
+        result = await engine.score_cached(candidate)
+
+        assert isinstance(result, ScoreResult)
+        # Key behavior: no crash and correct result even with empty SHA
+
+    async def test_score_does_not_use_store(self, feature_store: FeatureStore) -> None:
+        """Sync score() method does not interact with the store."""
+        engine = ScoringEngine(store=feature_store)
+        candidate = _make_candidate()
+
+        result = engine.score(candidate)
+
+        assert isinstance(result, ScoreResult)
+        # Store should be empty — score() is sync and doesn't touch the store
+        cached = await feature_store.get(candidate.full_name, candidate.commit_sha)
+        assert cached is None
+
+    async def test_store_parameter_is_optional(self) -> None:
+        """ScoringEngine works without a store (backward compatibility)."""
+        engine = ScoringEngine(store=None)
+        candidate = _make_candidate()
+        result = engine.score(candidate)
+        assert isinstance(result, ScoreResult)
+
+        result_cached = await engine.score_cached(candidate)
+        assert isinstance(result_cached, ScoreResult)
+        assert result_cached.quality_score == result.quality_score

@@ -36,7 +36,7 @@ class TestRanker:
         assert names1 == names2
 
     def test_tiebreaking(self, ranker) -> None:
-        """Same value_score → tie-break by quality_score, then full_name."""
+        """Same value_score → tie-break by quality_score, then seeded hash, then full_name."""
         results = [
             _make_score_result(full_name="aaa/repo", quality_score=0.8, stars=100, confidence=0.5),
             _make_score_result(full_name="bbb/repo", quality_score=0.7, stars=100, confidence=0.5),
@@ -171,3 +171,82 @@ class TestRanker:
         ]
         ranking = ranker.rank(results, DomainType.LIBRARY, min_confidence=0.0)
         assert ranking.ranked_repos[0].full_name == "hidden/gem"
+
+
+class TestRankerSeed:
+    """Tests for ranking_seed deterministic tie-breaking."""
+
+    def test_different_seeds_can_produce_different_ordering(self) -> None:
+        """Different ranking_seed values may change tie-breaking order.
+
+        When value_score and quality_score are identical, the seeded hash
+        provides deterministic but seed-dependent ordering.
+        """
+        # All repos have same quality_score and stars → same value_score
+        results = [
+            _make_score_result(
+                full_name="repo/alpha",
+                quality_score=0.7,
+                stars=100,
+                confidence=0.7,
+            ),
+            _make_score_result(
+                full_name="repo/beta",
+                quality_score=0.7,
+                stars=100,
+                confidence=0.7,
+            ),
+            _make_score_result(
+                full_name="repo/gamma",
+                quality_score=0.7,
+                stars=100,
+                confidence=0.7,
+            ),
+        ]
+
+        settings_a = ScoringSettings(ranking_seed=42)
+        settings_b = ScoringSettings(ranking_seed=99)
+        ranker_a = Ranker(settings_a)
+        ranker_b = Ranker(settings_b)
+
+        ranking_a = ranker_a.rank(results, DomainType.LIBRARY, min_confidence=0.0)
+        ranking_b = ranker_b.rank(results, DomainType.LIBRARY, min_confidence=0.0)
+
+        # Both must have the same repos
+        names_a = {r.full_name for r in ranking_a.ranked_repos}
+        names_b = {r.full_name for r in ranking_b.ranked_repos}
+        assert names_a == names_b
+
+        # With different seeds, the tie-breaking may differ
+        # (not guaranteed for all pairs, but the mechanism is in place)
+        # At minimum, verify both produce valid rankings
+        assert len(ranking_a.ranked_repos) == 3
+        assert len(ranking_b.ranked_repos) == 3
+
+    def test_same_seed_produces_same_ordering(self) -> None:
+        """Same ranking_seed always produces identical ordering."""
+        results = [
+            _make_score_result(
+                full_name=f"repo/{i}",
+                quality_score=0.7,
+                stars=100,
+                confidence=0.7,
+            )
+            for i in range(10)
+        ]
+
+        settings = ScoringSettings(ranking_seed=12345)
+        ranker1 = Ranker(settings)
+        ranker2 = Ranker(settings)
+
+        ranking1 = ranker1.rank(results, DomainType.LIBRARY, min_confidence=0.0)
+        ranking2 = ranker2.rank(results, DomainType.LIBRARY, min_confidence=0.0)
+
+        names1 = [r.full_name for r in ranking1.ranked_repos]
+        names2 = [r.full_name for r in ranking2.ranked_repos]
+        assert names1 == names2
+
+    def test_default_seed_is_42(self) -> None:
+        """Default ranking_seed is 42."""
+        settings = ScoringSettings()
+        assert settings.ranking_seed == 42

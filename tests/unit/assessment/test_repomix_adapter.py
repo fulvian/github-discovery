@@ -161,8 +161,8 @@ class TestPack:
 
         assert result.compressed is False
 
-    async def test_pack_preserves_original_token_count(self) -> None:
-        """pack() preserves original total_tokens even when truncated."""
+    async def test_pack_estimates_token_count_when_truncated(self) -> None:
+        """pack() estimates total_tokens from truncated content, not original count."""
         adapter = RepomixAdapter(max_tokens=10, compression=True)
 
         large_content = "x" * 200
@@ -185,8 +185,9 @@ class TestPack:
                 "test/repo",
             )
 
-        # original token count preserved in metadata
-        assert result.total_tokens == 50
+        # Truncated content: 10 tokens * 4 chars/token = 40 chars
+        # Estimated tokens: 40 // 4 = 10 (not the original 50)
+        assert result.total_tokens == 10
         assert result.truncated is True
 
 

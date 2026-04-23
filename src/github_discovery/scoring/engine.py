@@ -20,13 +20,14 @@ from github_discovery.models.enums import ScoreDimension
 from github_discovery.models.scoring import DomainProfile, ScoreResult
 from github_discovery.scoring.confidence import ConfidenceCalculator
 from github_discovery.scoring.profiles import ProfileRegistry
-from github_discovery.scoring.types import DimensionScoreInfo, ScoringInput
+from github_discovery.scoring.types import DimensionScoreInfo, ScoringContext, ScoringInput
 from github_discovery.scoring.value_score import ValueScoreCalculator
 
 if TYPE_CHECKING:
     from github_discovery.models.assessment import DeepAssessmentResult
     from github_discovery.models.candidate import RepoCandidate
     from github_discovery.models.screening import ScreeningResult
+    from github_discovery.scoring.feature_store import FeatureStore
 
 logger = structlog.get_logger("github_discovery.scoring.engine")
 
@@ -74,14 +75,30 @@ class ScoringEngine:
     Combines Gate 1 + Gate 2 + Gate 3 results into a composite
     quality score with per-dimension breakdown.
 
+    Optionally backed by a FeatureStore for persistent caching — avoids
+    expensive recomputation when the same repo at the same commit is
+    scored again.
+
     Usage:
         engine = ScoringEngine()
         result = engine.score(candidate, screening, assessment)
     """
 
-    def __init__(self, settings: ScoringSettings | None = None) -> None:
-        """Initialize ScoringEngine with optional scoring settings."""
+    def __init__(
+        self,
+        settings: ScoringSettings | None = None,
+        store: FeatureStore | None = None,
+    ) -> None:
+        """Initialize ScoringEngine with optional settings and feature store.
+
+        Args:
+            settings: Scoring configuration. Uses defaults if None.
+            store: Optional FeatureStore for caching ScoreResults.
+                When provided, the engine checks the store before computing
+                and writes results back after computing.
+        """
         self._settings = settings or ScoringSettings()
+        self._store = store
         self._registry = ProfileRegistry()
         self._confidence_calc = ConfidenceCalculator()
         self._value_calc = ValueScoreCalculator(self._settings)
@@ -134,6 +151,50 @@ class ScoringEngine:
             gate3_available=assessment is not None,
         )
 
+    async def score_cached(
+        self,
+        candidate: RepoCandidate,
+        screening: ScreeningResult | None = None,
+        assessment: DeepAssessmentResult | None = None,
+        profile: DomainProfile | None = None,
+    ) -> ScoreResult:
+        """Score a single candidate with optional FeatureStore caching.
+
+        When a FeatureStore is configured, checks the store for a cached
+        result before computing. Stores the result after computing.
+
+        This is the async counterpart to ``score()`` — use it when a
+        FeatureStore is available to avoid redundant computation.
+
+        Args:
+            candidate: Repo metadata (includes stars for ValueScore).
+            screening: Gate 1+2 screening result (optional).
+            assessment: Gate 3 deep assessment (optional, only for top %).
+            profile: Domain profile for weighting (auto-detected if None).
+
+        Returns:
+            ScoreResult — from cache if available, otherwise freshly computed.
+        """
+        if self._store is not None and candidate.commit_sha:
+            cached = await self._store.get(
+                candidate.full_name,
+                candidate.commit_sha,
+            )
+            if cached is not None:
+                logger.debug(
+                    "scoring_cache_hit",
+                    full_name=candidate.full_name,
+                    commit_sha=candidate.commit_sha,
+                )
+                return cached
+
+        result = self.score(candidate, screening, assessment, profile)
+
+        if self._store is not None and candidate.commit_sha:
+            await self._store.put(result)
+
+        return result
+
     def score_batch(
         self,
         inputs: list[ScoringInput],
@@ -153,6 +214,43 @@ class ScoringEngine:
             )
             for inp in inputs
         ]
+
+    def score_from_context(self, context: ScoringContext) -> list[ScoreResult]:
+        """Score all candidates in a ScoringContext, applying overrides.
+
+        If ``context.domain_override`` is set, each candidate's domain is
+        temporarily replaced so the correct profile is resolved.  If
+        ``context.profile_override`` is set, that profile is used for every
+        candidate regardless of domain.
+
+        Args:
+            context: ScoringContext with inputs and optional overrides.
+
+        Returns:
+            List of ScoreResult with overrides applied.
+        """
+        results: list[ScoreResult] = []
+        for inp in context.inputs:
+            candidate = inp.candidate
+
+            # Apply domain override by creating a shallow copy
+            if context.domain_override is not None:
+                candidate = candidate.model_copy(
+                    update={"domain": context.domain_override},
+                )
+
+            # profile_override takes precedence over auto-detected profile
+            profile = context.profile_override
+
+            results.append(
+                self.score(
+                    candidate,
+                    inp.screening,
+                    inp.assessment,
+                    profile,
+                ),
+            )
+        return results
 
     def _compute_dimension_scores(
         self,

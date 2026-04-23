@@ -35,7 +35,6 @@ class ValueScoreCalculator:
     """
 
     _STAR_OFFSET = 10
-    _MAX_VALUE_SCORE = 1.0
 
     def __init__(self, settings: ScoringSettings | None = None) -> None:
         """Initialize ValueScoreCalculator with optional scoring settings."""
@@ -55,10 +54,7 @@ class ValueScoreCalculator:
         """
         if quality_score <= 0.0:
             return 0.0
-        denominator = log10(stars + self._STAR_OFFSET)
-        if denominator <= 0.0:
-            return min(quality_score, self._MAX_VALUE_SCORE)
-        return quality_score / denominator
+        return quality_score / log10(stars + self._STAR_OFFSET)
 
     def is_hidden_gem(
         self,

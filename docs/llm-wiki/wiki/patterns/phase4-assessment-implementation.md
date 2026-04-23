@@ -13,7 +13,7 @@ Phase 4 implements Gate 3 (Deep Technical Assessment) — the expensive LLM-base
 Only top 10-15% candidates from Gate 1+2 are assessed.
 
 **Status: COMPLETE + VERIFIED** — `make ci` green: ruff + ruff format + mypy --strict + pytest.
-700 total project tests pass (200 assessment tests).
+863 total project tests pass (230 assessment tests).
 
 ## Key Architecture Decisions
 
@@ -121,20 +121,35 @@ assessment/
 
 ## Test Coverage
 
-- 200 unit tests across 9 test files
+- 230 unit tests across 11 test files (including lang_analyzers/ and test_prompts/)
 - `conftest.py` with 8 shared fixtures
 - All modules tested with mocked external dependencies (repomix, instructor)
 - Hard gate enforcement tested (5 scenarios)
 - Budget controller tested (25 tests: per-repo, daily, cumulative, auto-reset)
 - Heuristic analyzer tested (38 tests: all 7 detection methods + scoring + categorization)
 - Result parser tested (34 tests: batch, per-dimension, fallback, name parsing, quality computation)
-- Orchestrator tested (24 tests: full pipeline, cache, quick_assess, hard gate)
+- Orchestrator tested (27 tests: full pipeline, cache, cache TTL, quick_assess, hard gate)
+- Prompt templates tested (26 tests: registry, content structure, domain focus adjustments)
+- Language analyzers tested (15 tests: base ABC, python ruff subprocess)
 
 ## Bugs Fixed During Verification
 
 1. **repomix API mismatch**: `RepoProcessor(repo_url)` then `process(config)` is wrong — config must be passed to constructor: `RepoProcessor(repo_url, config=config)`. Fixed with `asyncio.to_thread()` positional arg for `write_output=False`.
 2. **BudgetController.record_usage**: Originally used `token_usage.model_used` as repo identifier (wrong). Fixed to accept `full_name` as keyword argument.
 3. **PyPI package name**: `python-repomix` doesn't exist on PyPI; the correct package is `repomix`. Fixed in pyproject.toml.
+
+## Post-Implementation Verification (2026-04-23)
+
+Deep analysis of all assessment modules against blueprint §6 (Layer C), §16.5 and phase4 plan. 25+ issues identified across Phase 4+5. Phase 4 fixes:
+
+1. **repomix_adapter.py — timeout inflation (HIGH)**: Added `timeout_seconds=120` with `asyncio.wait_for()` to prevent indefinite hangs. Fixed `total_tokens` inflation after truncation — now uses char-based estimate (`total_chars // 4`) instead of counting tokens from removed content.
+2. **orchestrator.py — pre-pack budget check (HIGH)**: Added budget check BEFORE repomix call to avoid wasting resources on repos that will exceed budget. Fixed `gate_passed` derivation in `_check_hard_gate` error — was always 0, now correctly derives from screening result.
+3. **llm_provider.py — fallback model retry (HIGH)**: Added `fallback_model` support — if primary model fails, retry with fallback model. Safe `close()` with try/except to prevent double-close errors.
+4. **config.py — missing settings**: Added `llm_fallback_model`, `llm_subscription_mode`, and `effective_base_url` property to `AssessmentSettings`.
+5. **lang_analyzers/ module created (Task 4.6 — was 0%)**: New module with `base.py` (ABC for language-specific analyzers) and `python_analyzer.py` (ruff subprocess integration) + 15 tests.
+6. **Cache TTL enforcement (Issue #1)**: `_cache` changed from `dict[str, DeepAssessmentResult]` to `dict[str, tuple[DeepAssessmentResult, float]]` with `time.monotonic()` timestamps. On read, expired entries are evicted. `_cache_ttl_seconds` initialized from `AssessmentSettings.cache_ttl_hours`.
+7. **Domain-specific prompt adjustments (Issue #3)**: `get_prompt()` now accepts optional `domain: DomainType` parameter. Added `_DOMAIN_FOCUS` registry with 10 domain+dimension pairs (CLI, ML_LIB, SECURITY_TOOL, DEVOPS_TOOL, LANG_TOOL, DATA_TOOL) that append focus notes to prompts.
+8. **Prompt test coverage (Issue #2)**: Created `tests/unit/assessment/test_prompts/` with 26 tests across 4 test classes — verifying all 8 prompts contain required structural elements and domain focus works correctly.
 
 ## Context7 Verification Summary
 

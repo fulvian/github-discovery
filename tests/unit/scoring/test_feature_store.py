@@ -91,7 +91,7 @@ class TestFeatureStoreBatch:
         """get_batch returns None for missing entries."""
         keys = [("no/repo", "nosha")]
         batch = await feature_store.get_batch(keys)
-        assert batch["no/repo"] is None
+        assert batch[("no/repo", "nosha")] is None
 
 
 class TestFeatureStoreTTL:

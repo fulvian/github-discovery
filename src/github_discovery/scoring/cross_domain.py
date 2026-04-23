@@ -84,11 +84,6 @@ class CrossDomainGuard:
             domain_summaries=domain_summaries,
         )
 
-    def _check_cross_domain(self, results: list[ScoreResult]) -> bool:
-        """Check if results span multiple domains."""
-        domains = {r.domain for r in results}
-        return len(domains) > 1
-
     def _normalize_scores(
         self,
         results: list[ScoreResult],

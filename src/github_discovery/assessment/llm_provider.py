@@ -40,6 +40,7 @@ class LLMProvider:
         model: str = "gpt-4o",
         temperature: float = 0.1,
         max_retries: int = 3,
+        fallback_model: str | None = None,
     ) -> None:
         """Initialize NanoGPT provider with instructor-patched client.
 
@@ -49,11 +50,13 @@ class LLMProvider:
             model: Model identifier for LLM calls.
             temperature: Sampling temperature (lower = more deterministic).
             max_retries: Maximum retries for instructor structured output.
+            fallback_model: Optional fallback model identifier if primary fails.
         """
         self._model = model
         self._temperature = temperature
         self._max_retries = max_retries
         self._base_url = base_url
+        self._fallback_model = fallback_model
         self._token_usage: TokenUsage | None = None
 
         self._client = instructor.from_openai(
@@ -120,10 +123,30 @@ class LLMProvider:
                 max_tokens=_DEFAULT_MAX_TOKENS,
             )
         except Exception as exc:
-            raise AssessmentError(
+            original_error = AssessmentError(
                 f"LLM assessment failed for dimension '{dimension.value}': {exc}",
                 dimension=dimension.value,
-            ) from exc
+            )
+            # Attempt fallback model if configured and different from primary
+            if self._fallback_model and self._fallback_model != self._model:
+                try:
+                    result = await self._client.chat.completions.create(
+                        model=self._fallback_model,
+                        messages=messages,  # type: ignore[arg-type]
+                        response_model=LLMDimensionOutput,
+                        max_retries=self._max_retries,
+                        temperature=self._temperature,
+                        max_tokens=_DEFAULT_MAX_TOKENS,
+                    )
+                    logger.info(
+                        "dimension_assessed_with_fallback",
+                        dimension=dimension.value,
+                        fallback_model=self._fallback_model,
+                    )
+                except Exception:
+                    raise original_error from exc
+            else:
+                raise original_error from exc
 
         self._update_token_usage(result)
         logger.info(
@@ -184,9 +207,29 @@ class LLMProvider:
                 max_tokens=_DEFAULT_MAX_TOKENS,
             )
         except Exception as exc:
-            raise AssessmentError(
+            original_error = AssessmentError(
                 f"LLM batch assessment failed for dimensions {dimension_names}: {exc}",
-            ) from exc
+            )
+            # Attempt fallback model if configured and different from primary
+            if self._fallback_model and self._fallback_model != self._model:
+                try:
+                    result = await self._client.chat.completions.create(
+                        model=self._fallback_model,
+                        messages=messages,  # type: ignore[arg-type]
+                        response_model=LLMBatchOutput,
+                        max_retries=self._max_retries,
+                        temperature=self._temperature,
+                        max_tokens=_DEFAULT_MAX_TOKENS,
+                    )
+                    logger.info(
+                        "batch_assessed_with_fallback",
+                        dimensions=dimension_names,
+                        fallback_model=self._fallback_model,
+                    )
+                except Exception:
+                    raise original_error from exc
+            else:
+                raise original_error from exc
 
         self._update_token_usage(result)
         logger.info(
@@ -197,8 +240,14 @@ class LLMProvider:
         return result
 
     async def close(self) -> None:
-        """Close the underlying async client."""
-        await self._client.close()
+        """Close the underlying async client.
+
+        Wrapped in try/except to handle clients that don't expose close().
+        """
+        try:
+            await self._client.close()
+        except AttributeError:
+            logger.debug("llm_provider_close_not_supported")
         logger.debug("llm_provider_closed")
 
     @property

@@ -12,7 +12,7 @@ Confidence: high
 Phase 5 implements Layer D (Scoring & Ranking) — the final pipeline stage that combines Gate 1+2+3 outputs into composite multi-dimensional scores, applies domain profiles, computes anti-star-bias Value Scores, and produces ranked, explainable results.
 
 **Status: COMPLETE + VERIFIED** — `make ci` green: ruff + ruff format + mypy --strict + pytest.
-810 total project tests pass (110 scoring tests).
+863 total project tests pass (130 scoring tests).
 
 ## Key Architecture Decisions
 
@@ -22,6 +22,7 @@ Phase 5 implements Layer D (Scoring & Ranking) — the final pipeline stage that
 - Per-dimension scoring uses the best available signal: Gate 3 (LLM) > Gate 2 (static) > Gate 1 (metadata) > default
 - Composite `quality_score` computed as domain-weighted average of dimension scores
 - `DimensionScoreInfo` tracks source gate and confidence for each dimension
+- **FeatureStore integration**: Optional `store` parameter in constructor. `score()` remains sync (backward compatible); new `async score_cached()` checks store before computing and writes results back after
 
 ### ProfileRegistry: 11 Domain Profiles
 
@@ -47,7 +48,8 @@ Phase 5 implements Layer D (Scoring & Ranking) — the final pipeline stage that
 ### Ranker: Intra-Domain Ranking
 
 - Ranks repos within domain categories (never across domains)
-- Deterministic tie-breaking: value_score → quality_score → alphabetical
+- **Deterministic tie-breaking**: 4-tuple sort key `(-value_score, -quality_score, -seeded_hash, full_name)` where `seeded_hash = hash((ranking_seed, full_name))`
+- `ScoringSettings.ranking_seed: int = 42` — consumed for reproducible but seed-dependent tie-breaking
 - Hidden gem identification based on ValueScoreCalculator thresholds
 - `RankingResult` contains ranked list + metadata (domain, total count, hidden gems)
 
@@ -106,16 +108,16 @@ Added to `config.py` with env prefix `GHDISC_SCORING_`:
 
 ## Test Coverage
 
-- 110 unit tests across 9 test files in `tests/unit/scoring/`
+- 130 unit tests across 9 test files in `tests/unit/scoring/`
 - `conftest.py` with shared fixtures
 - All modules tested with mocked gate inputs
 - Test files:
   - `test_types.py` (9) — ScoringInput, DimensionScoreInfo, RankingResult serialization
-  - `test_engine.py` (13) — ScoringEngine composite scoring, missing gates, dimension mapping
+  - `test_engine.py` (18) — ScoringEngine composite scoring, missing gates, dimension mapping, FeatureStore integration (score_cached with cache hit/store/no-store)
   - `test_profiles.py` (10) — ProfileRegistry lookup, all 11 profiles, unknown domain
   - `test_value_score.py` (20) — Value Score formula, hidden gem detection, batch normalization
   - `test_confidence.py` (13) — Per-dimension confidence, gate coverage bonus, overall confidence
-  - `test_ranker.py` (13) — Intra-domain ranking, tie-breaking, hidden gem identification
+  - `test_ranker.py` (16) — Intra-domain ranking, tie-breaking, hidden gem identification, ranking_seed deterministic ordering
   - `test_cross_domain.py` (8) — Normalization, warnings, cross-domain guard
   - `test_explainability.py` (14) — Summary/full reports, improvement suggestions
   - `test_feature_store.py` (10) — SQLite CRUD, TTL expiry, batch ops, stats
@@ -139,6 +141,19 @@ pytest async fixtures with `yield` need `# noqa: ANN001` since the return type a
 1. **Pre-existing ruff PLW0108** in `test_budget_controller.py`: unnecessary lambda — replaced with direct reference
 2. **Pre-existing ruff F841** in `test_orchestrator.py`: unused variable — removed
 3. **Pre-existing ruff PLC0415** in `test_orchestrator.py`: misplaced import — moved to top-level
+
+## Post-Implementation Verification (2026-04-23)
+
+Deep analysis of all scoring modules against blueprint §7 (Layer D), §10 (Domain Strategy) and phase5 plan. Phase 5 fixes:
+
+1. **feature_store.py — get_batch key collision (CRITICAL)**: Changed return type from `dict[str, ...]` to `dict[tuple[str, str], ...]` to prevent key collision when different repos have same full_name prefix. Replaced `put_batch` loop with `executemany()` for performance.
+2. **types.py — missing profile override**: Added `profile_override: DomainProfile | None` to `ScoringContext` for per-session profile overrides.
+3. **engine.py — score_from_context()**: Added method that applies `domain_override` and `profile_override` from `ScoringContext`.
+4. **value_score.py — dead code removal**: Removed unreachable `denominator <= 0` branch (math.log10 always > 0 for args > 0) and unused `_MAX_VALUE_SCORE` constant.
+5. **confidence.py — redundant check removed**: Removed redundant null check that was already handled upstream.
+6. **cross_domain.py — unused method removed**: Removed `_check_cross_domain()` method that was never called.
+7. **ScoringEngine ↔ FeatureStore integration (Issue #4)**: Added optional `store: FeatureStore | None` parameter to constructor. New `async score_cached()` method checks store before computing, writes back after. Sync `score()` remains unchanged for backward compatibility.
+8. **Ranker ranking_seed consumption (Issue #5)**: `_sort_key()` now uses 4-tuple with seeded hash `hash((ranking_seed, full_name))` for deterministic but seed-dependent tie-breaking. Different seeds produce different orderings for tied repos.
 
 ## See Also
 

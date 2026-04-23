@@ -135,16 +135,22 @@ class Ranker:
 
         return ranking_map
 
-    def _sort_key(self, result: ScoreResult) -> tuple[float, float, str]:
+    def _sort_key(self, result: ScoreResult) -> tuple[float, float, int, str]:
         """Deterministic sort key for ranking.
 
         Primary: value_score (descending → negate)
         Secondary: quality_score (descending → negate)
-        Tertiary: full_name (ascending → alphabetical)
+        Tertiary: seeded hash for deterministic tie-breaking (descending → negate)
+        Quaternary: full_name (ascending → alphabetical)
 
-        This ensures deterministic ranking even with identical scores.
+        The seeded hash ensures that repos with identical value_score and
+        quality_score are ordered consistently based on ``ranking_seed``,
+        but differently across different seeds. This is more useful than
+        pure alphabetical for producing varied rankings when experimenting
+        with different seed values.
         """
-        return (-result.value_score, -result.quality_score, result.full_name)
+        seeded_hash = hash((self._settings.ranking_seed, result.full_name))
+        return (-result.value_score, -result.quality_score, -seeded_hash, result.full_name)
 
     def _identify_hidden_gems(
         self,

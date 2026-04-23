@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from github_discovery.models.assessment import DeepAssessmentResult  # noqa: TC001
 from github_discovery.models.candidate import RepoCandidate  # noqa: TC001
 from github_discovery.models.enums import DomainType, ScoreDimension  # noqa: TC001
-from github_discovery.models.scoring import RankedRepo  # noqa: TC001
+from github_discovery.models.scoring import DomainProfile, RankedRepo  # noqa: TC001
 from github_discovery.models.screening import ScreeningResult  # noqa: TC001
 
 
@@ -66,6 +66,10 @@ class ScoringContext(BaseModel):
     domain_override: DomainType | None = Field(
         default=None,
         description="Force all candidates to this domain",
+    )
+    profile_override: DomainProfile | None = Field(
+        default=None,
+        description="Force all candidates to use this profile",
     )
     session_id: str | None = Field(
         default=None,

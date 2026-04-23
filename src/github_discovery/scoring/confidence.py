@@ -138,9 +138,8 @@ class ConfidenceCalculator:
         Returns:
             Bonus value (0.0, 0.05, or 0.10).
         """
-        has_screening = screening is not None
-        has_gate1 = has_screening and screening is not None and screening.gate1 is not None
-        has_gate2 = has_screening and screening is not None and screening.gate2 is not None
+        has_gate1 = screening is not None and screening.gate1 is not None
+        has_gate2 = screening is not None and screening.gate2 is not None
         has_assessment = assessment is not None
 
         if has_gate1 and has_gate2 and has_assessment:
