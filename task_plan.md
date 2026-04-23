@@ -68,6 +68,15 @@ Questo crea un bias sistematico che esclude progetti tecnicamente eccellenti ma 
 - [x] `discovery/__init__.py` exports updated
 - [x] `make ci` green: ruff + mypy --strict + 320 tests passing
 
+### Phase 3: Lightweight Quality Screening (Layer B) [complete]
+- [x] Phase 3 implementation plan created: `docs/plans/phase3-implementation-plan.md`
+- [x] Wave 1 — Infrastructure: types.py (RepoContext, ScreeningContext), subprocess_runner.py — 14 tests
+- [x] Wave 2 — Gate 1 sub-score checkers: hygiene, ci_cd, test_footprint, release_discipline, dependency_quality, practices, maintenance — 62 tests
+- [x] Wave 3 — Gate 1 engine + Gate 2 adapters: gate1_metadata.py, scorecard_adapter.py, osv_adapter.py, secrets_check.py, complexity.py — 38 tests
+- [x] Wave 4 — Gate 2 engine + Orchestrator: gate2_static.py, orchestrator.py (Policy Engine) — 25 tests
+- [x] `screening/__init__.py` exports updated with all 16 public classes
+- [x] `make ci` green: ruff + mypy --strict + 459 tests passing
+
 ## Deliverables
 - `docs/foundation/github-discovery_foundation_blueprint.md`
 - `findings.md`

@@ -169,3 +169,72 @@
   - Discovery scoring: base + breadth bonus + channel quality bonuses, capped at 1.0
 - Updated wiki/patterns/phase2-discovery-plan.md with complete implementation record
 - Updated wiki/index.md with completion status
+
+## [2026-04-22] ingest | Phase 3 Screening Implementation Plan
+- Created docs/plans/phase3-implementation-plan.md
+- Context7 verification of PyDriller, Pydantic v2, aiosqlite, asyncio subprocess, structlog before planning
+- Covers 14 tasks: Gate 1 engine + 7 sub-score checkers, Gate 2 engine + 4 external tool integrations, orchestrator + policy engine
+- Key patterns verified:
+  - PyDriller: Repository.traverse_commits(), CodeChurn, ContributorsCount, ContributorsExperience, complexity via Lizard
+  - asyncio.create_subprocess_exec with PIPE and communicate() for gitleaks/scc subprocess integration
+  - aiosqlite async context manager patterns for screening result persistence
+  - OSV API POST query pattern for dependency vulnerability scanning
+  - OpenSSF Scorecard API GET pattern for security posture assessment
+- New dependency needed: pydriller>=2.6 for Git repository mining
+- External tools required (CLI): gitleaks, scc — with graceful degradation if not installed
+- ~116 unit tests planned across 15 test files
+- Updated wiki/index.md with plan reference
+
+## [2026-04-23] ingest | Phase 3 Screening Implementation Complete
+- All 14 tasks (3.1–3.14) from phase3-implementation-plan.md implemented and verified
+- 459 tests passing (139 new screening tests + 320 pre-existing), `make ci` green
+- 61 source files pass mypy --strict, 111 files pass ruff check/format
+- 16 screening modules implemented:
+  - Infrastructure: types.py, subprocess_runner.py
+  - Gate 1 (7 checkers): hygiene.py, ci_cd.py, test_footprint.py, release_discipline.py, dependency_quality.py, practices.py, maintenance.py
+  - Gate 1 engine: gate1_metadata.py
+  - Gate 2 (4 adapters): scorecard_adapter.py, osv_adapter.py, secrets_check.py, complexity.py
+  - Gate 2 engine: gate2_static.py
+  - Policy Engine: orchestrator.py
+- Key decisions:
+  - SubprocessRunner for async subprocess with graceful degradation
+  - PyDriller deferred — API-based heuristics (confidence=0.7) by default
+  - OSV adapter returns neutral scores (confidence=0.0) — lockfile parsing deferred
+  - TypeVar("_SubScoreT", bound=SubScore) for type-safe sub-score collection
+  - Domain-specific thresholds in orchestrator (SECURITY → stricter Gate 2)
+- Created wiki/patterns/phase3-screening-implementation.md
+- Updated wiki/index.md with completion entry
+
+## [2026-04-23] ingest | Phase 4 Deep Assessment Implementation Plan
+- Created docs/plans/phase4-implementation-plan.md
+- Context7 verification of python-repomix, instructor, litellm before planning
+- External documentation verified: NanoGPT API docs (https://docs.nano-gpt.com/introduction, https://docs.nano-gpt.com/api-reference/endpoint/chat-completion)
+- Key architecture decisions:
+  - LLM Provider: NanoGPT (OpenAI-compatible) with subscription endpoint
+  - SDK: openai + instructor for structured output with Pydantic validation + retry
+  - litellm scartato: NanoGPT already handles multi-provider routing
+  - Codebase packing: python-repomix (programmatic, not CLI)
+  - Structured output: response_format json_schema mapping to Pydantic models
+- Covers 8 tasks: Repomix adapter, LLM provider, prompts (8 dimensions), result parser, heuristics, lang analyzers, budget controller, orchestrator
+- New dependencies: python-repomix>=0.1.0, openai>=1.30, instructor>=1.4
+- ~65 unit tests + 3 integration tests planned
+- Created wiki/patterns/phase4-assessment-implementation.md
+- Updated wiki/index.md with new article
+
+## [2026-04-23] ingest | Phase 3 Verification and Bug Fixes
+- Systematic verification of Phase 3 screening against blueprint §16.2-16.5 and roadmap tasks 3.1-3.14
+- 7 bugs/gaps found and fixed:
+  - CRITICAL: Shallow clone management added to gate2_static.py (git clone --depth=1 + cleanup)
+  - CRITICAL: SubprocessRunner wired into SecretsChecker and ComplexityAnalyzer
+  - HIGH: OSV adapter rewritten from stub to actual API integration (httpx, severity scoring)
+  - HIGH: hard_gate_enforcement setting now honored in Gate2StaticScreener.screen()
+  - HIGH: GateLevel comparison uses int() conversion instead of string comparison
+  - MEDIUM: All 12 DomainType values now have domain-specific thresholds (was 6 of 12)
+  - MEDIUM: Resource cleanup added (close() methods for Gate2 and ScorecardAdapter)
+- Test updates:
+  - test_gate2_static.py: 9 new tests (clone management, hard_gate toggle, cleanup, close)
+  - test_osv_adapter.py: Rewritten with 16 properly mocked tests (no real API calls)
+  - test_orchestrator.py: Added parametrized TestAllDomainThresholds (22 test cases)
+- 500 total tests pass, `make ci` green: ruff + mypy --strict + pytest
+- Updated wiki/patterns/phase3-screening-implementation.md with verification findings
+- Updated wiki/index.md with revised Phase 3 entry

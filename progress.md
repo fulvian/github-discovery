@@ -155,3 +155,52 @@
 - `src/github_discovery/discovery/` — 12 new modules
 - `tests/unit/discovery/` — 10 new test files + updated conftest.py
 - `docs/llm-wiki/wiki/` — Updated phase2-discovery-plan.md, index.md, log.md
+
+## Session: 2026-04-23 (Phase 3 Implementation)
+
+### 00:00 — Phase 3 Lightweight Quality Screening Complete
+- Implemented all 14 tasks from `docs/plans/phase3-implementation-plan.md`
+- 459 tests passing (139 new screening tests + 320 pre-existing), `make ci` green
+- 61 source files pass mypy --strict, 111 files pass ruff check/format
+
+### Modules Created (16 in `src/github_discovery/screening/`)
+- **Infrastructure**: `types.py` (RepoContext, ScreeningContext, SubprocessResult), `subprocess_runner.py`
+- **Gate 1 sub-score checkers**: `hygiene.py`, `ci_cd.py`, `test_footprint.py`, `release_discipline.py`, `dependency_quality.py`, `practices.py`, `maintenance.py`
+- **Gate 1 engine**: `gate1_metadata.py` (Gate1MetadataScreener)
+- **Gate 2 adapters**: `scorecard_adapter.py`, `osv_adapter.py`, `secrets_check.py`, `complexity.py`
+- **Gate 2 engine**: `gate2_static.py` (Gate2StaticScreener)
+- **Orchestrator**: `orchestrator.py` (ScreeningOrchestrator — Policy Engine)
+
+### Test Files Created (18 in `tests/unit/screening/`)
+- `conftest.py` (16 shared fixtures), `__init__.py`
+- `test_types.py` (9), `test_subprocess_runner.py` (5)
+- `test_hygiene.py` (10), `test_ci_cd.py` (10), `test_test_footprint.py` (10)
+- `test_release_discipline.py` (10), `test_dependency_quality.py` (7)
+- `test_practices.py` (5), `test_maintenance.py` (10)
+- `test_gate1_metadata.py` (8), `test_scorecard_adapter.py` (6)
+- `test_osv_adapter.py` (7), `test_secrets_check.py` (8)
+- `test_complexity.py` (9), `test_gate2_static.py` (10), `test_orchestrator.py` (16)
+
+### Key Decisions
+- Sub-process tools (gitleaks, scc) use `SubprocessRunner` with graceful degradation (confidence=0.0-0.3)
+- PyDriller requires local clone — maintenance analyzer uses API-based heuristics by default (confidence=0.7)
+- OSV adapter returns neutral scores (confidence=0.0) since full lockfile parsing is deferred
+- Gate 1 uses 7 sub-score checkers with weighted composite (`compute_total()`)
+- Gate 2 uses 4 adapters: Scorecard API, OSV API, gitleaks, scc
+- Hard gate enforcement: `ScreeningResult.can_proceed_to_gate3` checks both gates pass
+- Orchestrator supports domain-specific thresholds (SECURITY domain → stricter Gate 2)
+- `_context_override` helper compares against Pydantic field default to detect explicit user overrides
+- `TypeVar("_SubScoreT", bound=SubScore)` for type-safe sub-score collection in Gate 1
+
+### Issues Resolved
+- Ruff I001 import sorting in `__init__.py` and `test_scorecard_adapter.py` — auto-fixed
+- Ruff RUF022 `__all__` not sorted — removed inline comments, alphabetical order
+- Ruff S108 `/tmp/repo` in tests — added `# noqa: S108` (mock paths in tests)
+- Ruff PLR0911 too many return statements — refactored `_get_json` to dict dispatch
+- Ruff format issue in `scorecard_adapter.py` — auto-fixed
+
+### Files Modified
+- `src/github_discovery/screening/` — 16 new modules + `__init__.py` updated with all exports
+- `tests/unit/screening/` — 18 new test files
+- `.workflow/state.md` — Updated with Phase 3 completion
+- `progress.md` — This update
