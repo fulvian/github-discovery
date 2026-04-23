@@ -65,7 +65,7 @@ async def test_dequeue_empty_returns_none(queue: AsyncTaskQueue) -> None:
 
 async def test_dequeue_timeout(queue: AsyncTaskQueue) -> None:
     """Dequeue should respect the timeout parameter."""
-    import time  # noqa: PLC0415
+    import time
 
     start = time.perf_counter()
     result = await queue.dequeue(timeout=0.2)

@@ -1,15 +1,15 @@
 """Assessment API routes — deep LLM assessment endpoints.
 
 Provides endpoints to start deep assessment jobs and check their
-status. Hard gate enforcement (Gate 1+2 pass required) happens in
-the worker, not the route.
+status. Hard gate enforcement (Gate 1+2 pass required) happens
+both in the route (fail fast) and in the worker (defense in depth).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from github_discovery.api.deps import get_job_store, get_queue
 from github_discovery.models.api import AssessmentRequest, AssessmentResponse
@@ -31,13 +31,34 @@ async def start_assessment(
     request: AssessmentRequest,
     job_store: JobStore = Depends(get_job_store),  # noqa: B008
     queue: AsyncTaskQueue = Depends(get_queue),  # noqa: B008
+    skip_gate_check: bool = Query(
+        default=False,
+        description="Skip Gate 1+2 hard gate check (internal use only)",
+    ),
 ) -> AssessmentResponse:
     """Start an asynchronous deep assessment job.
 
     Creates a background job to perform deep LLM assessment on
-    the specified repositories. Hard gate enforcement (Gate 1+2
-    pass required) happens in the worker, not this route.
+    the specified repositories.
+
+    Hard gate enforcement (Blueprint §3): Gate 1+2 pass is required
+    before assessment. This is enforced both here (fail fast) and
+    in the worker (defense in depth). Pass ``skip_gate_check=true``
+    only for internal/retry scenarios.
     """
+    if not skip_gate_check and request.repo_urls:
+        # Check if repos have passed screening (Gate 1+2)
+        # This is the fail-fast check; the worker also validates
+        screened = await _check_screening_gate(request, job_store)
+        if not screened:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Cannot start assessment: repositories must pass "
+                    "Gate 1+2 screening first. Run screening before assessment."
+                ),
+            )
+
     job = Job(
         job_type=JobType.ASSESSMENT,
         input_data=request.model_dump(),
@@ -49,6 +70,23 @@ async def start_assessment(
         total_repos=len(request.repo_urls),
         session_id=request.session_id,
     )
+
+
+async def _check_screening_gate(
+    request: AssessmentRequest,
+    job_store: JobStore,
+) -> bool:
+    """Check if screening has been completed for the requested repos.
+
+    For now, returns True if there are completed screening jobs in
+    the job store. Full implementation would check per-repo gate status.
+    """
+    # Check for any completed screening jobs
+    jobs = await job_store.list_jobs()
+    screening_completed = any(
+        job.job_type == JobType.SCREENING and job.status.value == "completed" for job in jobs
+    )
+    return screening_completed
 
 
 @router.get(

@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import aiosqlite
 import structlog
@@ -76,6 +77,10 @@ class FeatureStore:
     async def _get_db(self) -> aiosqlite.Connection:
         """Get or create the database connection."""
         if self._db is None:
+            # Ensure parent directory exists for file-based databases
+            db_path = Path(self._db_path)
+            if db_path.parent and not db_path.parent.exists():
+                db_path.parent.mkdir(parents=True, exist_ok=True)
             self._db = await aiosqlite.connect(self._db_path)
             self._db.row_factory = aiosqlite.Row
             await self._db.executescript(_CREATE_TABLE_SQL)
@@ -260,6 +265,51 @@ class FeatureStore:
             oldest_entry=oldest,
             newest_entry=newest,
         )
+
+    async def get_by_domain(
+        self,
+        domain: DomainType,
+    ) -> list[ScoreResult]:
+        """Get all non-expired score results for a domain.
+
+        Args:
+            domain: Domain type to filter by.
+
+        Returns:
+            List of ScoreResult for the given domain.
+        """
+        db = await self._get_db()
+        cutoff = (datetime.now(UTC) - timedelta(hours=self._ttl_hours)).isoformat()
+        cursor = await db.execute(
+            "SELECT * FROM score_features WHERE domain = ? AND scored_at >= ?",
+            (domain.value, cutoff),
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_result(row) for row in rows]
+
+    async def get_latest(
+        self,
+        full_name: str,
+    ) -> ScoreResult | None:
+        """Get the most recent score result for a repo.
+
+        Args:
+            full_name: Repository full name (owner/repo).
+
+        Returns:
+            Most recent ScoreResult or None if not found or expired.
+        """
+        db = await self._get_db()
+        cutoff = (datetime.now(UTC) - timedelta(hours=self._ttl_hours)).isoformat()
+        cursor = await db.execute(
+            "SELECT * FROM score_features WHERE full_name = ? AND scored_at >= ? "
+            "ORDER BY scored_at DESC LIMIT 1",
+            (full_name, cutoff),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_result(row)
 
     async def close(self) -> None:
         """Close database connection."""

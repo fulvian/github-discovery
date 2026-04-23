@@ -58,6 +58,14 @@ class PoolManager:
         self._db_path = str(db_path)
         self._db: aiosqlite.Connection | None = None
 
+    async def initialize(self) -> None:
+        """Open database connection and create tables.
+
+        Called during application lifespan startup. If not called,
+        tables are created lazily on first access via _get_db().
+        """
+        await self._get_db()
+
     async def _get_db(self) -> aiosqlite.Connection:
         """Get or create the database connection."""
         if self._db is None:

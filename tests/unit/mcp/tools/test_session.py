@@ -12,9 +12,9 @@ from github_discovery.models.session import SessionState, SessionStatus
 
 
 @pytest.fixture
-def app_ctx(settings: Settings, mock_session_manager: AsyncMock) -> AppContext:
+def app_ctx(settings: Settings, mock_session_manager: AsyncMock, make_app_ctx) -> AppContext:
     """Create AppContext with mock session manager."""
-    return AppContext(settings=settings, session_manager=mock_session_manager)
+    return make_app_ctx(settings, mock_session_manager)
 
 
 @pytest.fixture

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from github_discovery.config import Settings
-from github_discovery.mcp.server import AppContext
 from github_discovery.models.session import SessionState
 
 
@@ -19,6 +18,7 @@ class TestScreenCandidatesTool:
         mock_session_manager: AsyncMock,
         mock_pool_manager: tuple,
         mock_screening_orchestrator: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """screen_candidates returns screening summary."""
         mock_pm, pool_id = mock_pool_manager
@@ -26,27 +26,25 @@ class TestScreenCandidatesTool:
         mock_session_manager.get_or_create = AsyncMock(return_value=session)
         mock_session_manager.update = AsyncMock()
 
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(
+            settings,
+            mock_session_manager,
+            mock_pool_manager=mock_pm,
+            mock_screening_orch=mock_screening_orchestrator,
+        )
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
-        with (
-            patch("github_discovery.mcp.tools.screening.PoolManager", return_value=mock_pm),
-            patch(
-                "github_discovery.mcp.tools.screening._run_screening",
-                return_value=await mock_screening_orchestrator.screen(AsyncMock()),
-            ),
-        ):
-            from github_discovery.mcp.server import create_server
+        from github_discovery.mcp.server import create_server
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["screen_candidates"].fn
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["screen_candidates"].fn
 
-            result = await tool_fn(
-                pool_id=pool_id,
-                gate_level="both",
-                ctx=mock_ctx,
-            )
+        result = await tool_fn(
+            pool_id=pool_id,
+            gate_level="both",
+            ctx=mock_ctx,
+        )
 
         assert result["success"] is True
         assert result["data"]["total_screened"] == 2
@@ -58,6 +56,7 @@ class TestScreenCandidatesTool:
         self,
         settings: Settings,
         mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """screen_candidates returns error for missing pool."""
         mock_pm = AsyncMock()
@@ -67,17 +66,16 @@ class TestScreenCandidatesTool:
         session = SessionState(name="screening")
         mock_session_manager.get_or_create = AsyncMock(return_value=session)
 
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(settings, mock_session_manager, mock_pool_manager=mock_pm)
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
-        with patch("github_discovery.mcp.tools.screening.PoolManager", return_value=mock_pm):
-            from github_discovery.mcp.server import create_server
+        from github_discovery.mcp.server import create_server
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["screen_candidates"].fn
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["screen_candidates"].fn
 
-            result = await tool_fn(pool_id="nonexistent", ctx=mock_ctx)
+        result = await tool_fn(pool_id="nonexistent", ctx=mock_ctx)
 
         assert result["success"] is False
         assert "not found" in result["error_message"]
@@ -86,6 +84,7 @@ class TestScreenCandidatesTool:
         self,
         settings: Settings,
         mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """screen_candidates returns error for empty pool."""
         from github_discovery.models.candidate import CandidatePool
@@ -98,17 +97,16 @@ class TestScreenCandidatesTool:
         session = SessionState(name="screening")
         mock_session_manager.get_or_create = AsyncMock(return_value=session)
 
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(settings, mock_session_manager, mock_pool_manager=mock_pm)
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
-        with patch("github_discovery.mcp.tools.screening.PoolManager", return_value=mock_pm):
-            from github_discovery.mcp.server import create_server
+        from github_discovery.mcp.server import create_server
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["screen_candidates"].fn
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["screen_candidates"].fn
 
-            result = await tool_fn(pool_id=empty_pool.pool_id, ctx=mock_ctx)
+        result = await tool_fn(pool_id=empty_pool.pool_id, ctx=mock_ctx)
 
         assert result["success"] is False
         assert "empty" in result["error_message"]
@@ -120,18 +118,23 @@ class TestGetShortlistTool:
     async def test_get_shortlist_happy_path(
         self,
         settings: Settings,
+        mock_session_manager: AsyncMock,
         mock_pool_manager: tuple,
+        make_app_ctx,
     ) -> None:
         """get_shortlist returns filtered candidates."""
         mock_pm, pool_id = mock_pool_manager
 
-        with patch("github_discovery.mcp.tools.screening.PoolManager", return_value=mock_pm):
-            from github_discovery.mcp.server import create_server
+        app_ctx = make_app_ctx(settings, mock_session_manager, mock_pool_manager=mock_pm)
+        mock_ctx = AsyncMock()
+        mock_ctx.request_context.lifespan_context = app_ctx
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["get_shortlist"].fn
+        from github_discovery.mcp.server import create_server
 
-            result = await tool_fn(pool_id=pool_id, min_score=0.5, ctx=AsyncMock())
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["get_shortlist"].fn
+
+        result = await tool_fn(pool_id=pool_id, min_score=0.5, ctx=mock_ctx)
 
         assert result["success"] is True
         assert result["data"]["total"] == 2
@@ -139,19 +142,24 @@ class TestGetShortlistTool:
     async def test_get_shortlist_pool_not_found(
         self,
         settings: Settings,
+        mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """get_shortlist returns error for missing pool."""
         mock_pm = AsyncMock()
         mock_pm.get_pool = AsyncMock(return_value=None)
         mock_pm.close = AsyncMock()
 
-        with patch("github_discovery.mcp.tools.screening.PoolManager", return_value=mock_pm):
-            from github_discovery.mcp.server import create_server
+        app_ctx = make_app_ctx(settings, mock_session_manager, mock_pool_manager=mock_pm)
+        mock_ctx = AsyncMock()
+        mock_ctx.request_context.lifespan_context = app_ctx
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["get_shortlist"].fn
+        from github_discovery.mcp.server import create_server
 
-            result = await tool_fn(pool_id="nonexistent", ctx=AsyncMock())
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["get_shortlist"].fn
+
+        result = await tool_fn(pool_id="nonexistent", ctx=mock_ctx)
 
         assert result["success"] is False
 
@@ -164,26 +172,27 @@ class TestQuickScreenTool:
         settings: Settings,
         mock_session_manager: AsyncMock,
         mock_screening_orchestrator: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """quick_screen returns result for single repo."""
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(
+            settings,
+            mock_session_manager,
+            mock_screening_orch=mock_screening_orchestrator,
+        )
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
-        with patch(
-            "github_discovery.mcp.tools.screening._quick_screen_single",
-            return_value=await mock_screening_orchestrator.quick_screen(AsyncMock()),
-        ):
-            from github_discovery.mcp.server import create_server
+        from github_discovery.mcp.server import create_server
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["quick_screen"].fn
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["quick_screen"].fn
 
-            result = await tool_fn(
-                repo_url="https://github.com/owner/repo-1",
-                gate_levels="1",
-                ctx=mock_ctx,
-            )
+        result = await tool_fn(
+            repo_url="https://github.com/owner/repo-1",
+            gate_levels="1",
+            ctx=mock_ctx,
+        )
 
         assert result["success"] is True
         assert result["data"]["repo"] == "owner/repo-1"
@@ -192,9 +201,10 @@ class TestQuickScreenTool:
         self,
         settings: Settings,
         mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """quick_screen returns error for invalid URL."""
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(settings, mock_session_manager)
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 

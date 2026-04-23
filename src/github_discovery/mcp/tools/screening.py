@@ -13,7 +13,6 @@ import structlog
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
 
-from github_discovery.discovery.pool import PoolManager
 from github_discovery.mcp.config import should_register_tool
 from github_discovery.mcp.output_format import format_tool_result
 from github_discovery.mcp.progress import report_screening_progress
@@ -24,10 +23,7 @@ from github_discovery.screening.types import ScreeningContext
 
 if TYPE_CHECKING:
     from github_discovery.config import Settings
-    from github_discovery.discovery.github_client import GitHubRestClient
-    from github_discovery.models.candidate import RepoCandidate
     from github_discovery.models.screening import ScreeningResult
-    from github_discovery.screening.orchestrator import ScreeningOrchestrator
 
 logger = structlog.get_logger("github_discovery.mcp.tools.screening")
 
@@ -74,12 +70,8 @@ def register_screening_tools(mcp: FastMCP, settings: Settings) -> None:
             app_ctx = get_app_context(real_ctx)
             session = await app_ctx.session_manager.get_or_create(session_id)
 
-            # Resolve pool
-            pool_manager = PoolManager()
-            try:
-                pool = await pool_manager.get_pool(pool_id)
-            finally:
-                await pool_manager.close()
+            # Resolve pool from shared PoolManager
+            pool = await app_ctx.pool_manager.get_pool(pool_id)
 
             if not pool:
                 return format_tool_result(
@@ -115,8 +107,8 @@ def register_screening_tools(mcp: FastMCP, settings: Settings) -> None:
                 session_id=session.session_id,
             )
 
-            # Run screening via orchestrator
-            results = await _run_screening(app_ctx, screen_ctx)
+            # Run screening via shared orchestrator
+            results = await app_ctx.screening_orch.screen(screen_ctx)
 
             # Compute summary
             gate1_passed = sum(1 for r in results if r.gate1 and r.gate1.gate1_pass)
@@ -197,13 +189,10 @@ def register_screening_tools(mcp: FastMCP, settings: Settings) -> None:
                 limit: Max results to return (default: 20)
                 ctx: MCP request context (injected by FastMCP)
             """
-            _require_ctx(ctx)
+            real_ctx = _require_ctx(ctx)
+            app_ctx = get_app_context(real_ctx)
 
-            pool_manager = PoolManager()
-            try:
-                pool = await pool_manager.get_pool(pool_id)
-            finally:
-                await pool_manager.close()
+            pool = await app_ctx.pool_manager.get_pool(pool_id)
 
             if not pool:
                 return format_tool_result(
@@ -284,11 +273,10 @@ def register_screening_tools(mcp: FastMCP, settings: Settings) -> None:
                 updated_at=now,
             )
 
-            # Run quick screen via screening orchestrator
-            result = await _quick_screen_single(
-                app_ctx,
+            # Run quick screen via shared screening orchestrator
+            result = await app_ctx.screening_orch.quick_screen(
                 candidate,
-                gate_levels,
+                gate_levels=gate_levels,
             )
 
             return format_tool_result(
@@ -311,56 +299,20 @@ def register_screening_tools(mcp: FastMCP, settings: Settings) -> None:
             )
 
 
-def _build_screening_orchestrator(
-    app_ctx: AppContext,
-) -> tuple[ScreeningOrchestrator, GitHubRestClient]:
-    """Build a ScreeningOrchestrator with its dependencies.
-
-    Returns:
-        Tuple of (ScreeningOrchestrator, GitHubRestClient) for cleanup.
-    """
-    from github_discovery.discovery.github_client import GitHubRestClient
-    from github_discovery.screening.gate1_metadata import Gate1MetadataScreener
-    from github_discovery.screening.gate2_static import Gate2StaticScreener
-    from github_discovery.screening.orchestrator import ScreeningOrchestrator
-
-    rest_client = GitHubRestClient(app_ctx.settings.github)
-    gate1 = Gate1MetadataScreener(rest_client, app_ctx.settings.screening)
-    gate2 = Gate2StaticScreener(
-        rest_client,
-        app_ctx.settings.screening,
-        app_ctx.settings.github,
-    )
-    orch = ScreeningOrchestrator(app_ctx.settings, gate1, gate2)
-    return orch, rest_client
-
-
-async def _run_screening(
-    app_ctx: AppContext,
-    screen_ctx: ScreeningContext,
-) -> list[ScreeningResult]:
-    """Run screening via the ScreeningOrchestrator."""
-    orch, _rest_client = _build_screening_orchestrator(app_ctx)
-    return await orch.screen(screen_ctx)
-
-
-async def _quick_screen_single(
-    app_ctx: AppContext,
-    candidate: RepoCandidate,
-    gate_levels: str,
-) -> ScreeningResult:
-    """Quick screen a single candidate."""
-    orch, _rest_client = _build_screening_orchestrator(app_ctx)
-    return await orch.quick_screen(candidate, gate_levels=gate_levels)
-
-
 def _resolve_gate_level(level: str) -> GateLevel:
-    """Resolve gate level string to GateLevel enum."""
+    """Resolve gate level string to GateLevel enum.
+
+    "1" → Gate 1 only (METADATA)
+    "2" → Gate 2 only (STATIC_SECURITY) — orchestrator skips Gate 1 if not requested
+    "both" → both gates — STATIC_SECURITY triggers both since Gate 2 requires Gate 1 pass
+    """
     if level == "1":
         return GateLevel.METADATA
     elif level == "2":
         return GateLevel.STATIC_SECURITY
-    return GateLevel.STATIC_SECURITY  # "both" defaults to both gates
+    # "both" → run both gates. The orchestrator always runs Gate 1 first,
+    # and only runs Gate 2 if Gate 1 passed. Using STATIC_SECURITY covers both.
+    return GateLevel.STATIC_SECURITY
 
 
 def _composite_score(result: ScreeningResult) -> float:

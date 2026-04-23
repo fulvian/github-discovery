@@ -16,11 +16,9 @@ from mcp.server.session import ServerSession
 from github_discovery.mcp.config import should_register_tool
 from github_discovery.mcp.output_format import format_tool_result
 from github_discovery.mcp.server import AppContext, get_app_context
-from github_discovery.models.enums import DomainType, ScoreDimension
+from github_discovery.models.enums import DomainType
 from github_discovery.models.scoring import ScoreResult
 from github_discovery.scoring.explainability import ExplainabilityGenerator
-from github_discovery.scoring.feature_store import FeatureStore
-from github_discovery.scoring.ranker import Ranker
 
 if TYPE_CHECKING:
     from github_discovery.config import Settings
@@ -89,8 +87,8 @@ def register_ranking_tools(mcp: FastMCP, settings: Settings) -> None:
                     ),
                 )
 
-            # Rank using the Ranker
-            ranker = Ranker(app_ctx.settings.scoring)
+            # Rank using the shared Ranker
+            ranker = app_ctx.ranker
             ranking = ranker.rank(
                 score_results,
                 resolved_domain,
@@ -315,115 +313,16 @@ async def _load_scores_for_domain(
     app_ctx: AppContext,
     domain: DomainType,
 ) -> list[ScoreResult]:
-    """Load scored results for a domain from the feature store.
-
-    Queries the feature store SQLite database for all scores in a domain.
-    """
-    import json
-
-    import aiosqlite
-
-    # Use default in-memory store path convention
-    store_path = ".ghdisc/features.db"
-
-    results: list[ScoreResult] = []
-    try:
-        db = await aiosqlite.connect(store_path)
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM score_features WHERE domain = ?",
-            (domain.value,),
-        )
-        rows = await cursor.fetchall()
-        await db.close()
-
-        for row in rows:
-            dim_raw = json.loads(row["dimension_scores"])
-            dimension_scores: dict[ScoreDimension, float] = {}
-            for k, v in dim_raw.items():
-                from contextlib import suppress
-
-                with suppress(ValueError):
-                    dimension_scores[ScoreDimension(k)] = v
-
-            from datetime import datetime
-
-            results.append(
-                ScoreResult(
-                    full_name=row["full_name"],
-                    commit_sha=row["commit_sha"],
-                    domain=DomainType(row["domain"]),
-                    quality_score=row["quality_score"],
-                    dimension_scores=dimension_scores,
-                    confidence=row["confidence"],
-                    stars=row["stars"],
-                    gate1_total=row["gate1_total"],
-                    gate2_total=row["gate2_total"],
-                    gate3_available=bool(row["gate3_available"]),
-                    scored_at=datetime.fromisoformat(row["scored_at"]),
-                ),
-            )
-    except Exception:
-        logger.debug("feature_store_not_available_for_domain_query")
-
-    return results
+    """Load scored results for a domain from the shared feature store."""
+    return await app_ctx.feature_store.get_by_domain(domain)
 
 
 async def _load_score_for_repo(
     app_ctx: AppContext,
     full_name: str,
 ) -> ScoreResult | None:
-    """Load a scored result for a single repo from feature store."""
-    store = FeatureStore()
-    try:
-        await store.initialize()
-        # Try with empty commit_sha first (may not find without SHA)
-        # Fall back to direct DB query
-        import json
-
-        import aiosqlite
-
-        db_path = ".ghdisc/features.db"
-        try:
-            db = await aiosqlite.connect(db_path)
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                "SELECT * FROM score_features WHERE full_name = ? ORDER BY scored_at DESC LIMIT 1",
-                (full_name,),
-            )
-            row = await cursor.fetchone()
-            await db.close()
-
-            if row is None:
-                return None
-
-            dim_raw = json.loads(row["dimension_scores"])
-            dimension_scores: dict[ScoreDimension, float] = {}
-            for k, v in dim_raw.items():
-                from contextlib import suppress
-
-                with suppress(ValueError):
-                    dimension_scores[ScoreDimension(k)] = v
-
-            from datetime import datetime
-
-            return ScoreResult(
-                full_name=row["full_name"],
-                commit_sha=row["commit_sha"],
-                domain=DomainType(row["domain"]),
-                quality_score=row["quality_score"],
-                dimension_scores=dimension_scores,
-                confidence=row["confidence"],
-                stars=row["stars"],
-                gate1_total=row["gate1_total"],
-                gate2_total=row["gate2_total"],
-                gate3_available=bool(row["gate3_available"]),
-                scored_at=datetime.fromisoformat(row["scored_at"]),
-            )
-        except Exception:
-            return None
-    finally:
-        await store.close()
+    """Load a scored result for a single repo from shared feature store."""
+    return await app_ctx.feature_store.get_latest(full_name)
 
 
 def _parse_repo_url(url: str) -> str:

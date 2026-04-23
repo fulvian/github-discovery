@@ -91,7 +91,7 @@ class TestScoringContext:
         assert ctx.session_id == "test-session-123"
 
     def test_multiple_inputs(self, sample_candidate) -> None:
-        from tests.unit.scoring.conftest import _make_candidate  # noqa: PLC0415
+        from tests.unit.scoring.conftest import _make_candidate
 
         candidates = [_make_candidate(full_name=f"test/repo{i}") for i in range(5)]
         inputs = [ScoringInput(candidate=c) for c in candidates]

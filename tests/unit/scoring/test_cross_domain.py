@@ -79,7 +79,7 @@ class TestCrossDomainGuard:
 
     def test_warning_disabled(self) -> None:
         """Warning can be disabled via settings."""
-        from github_discovery.config import ScoringSettings  # noqa: PLC0415
+        from github_discovery.config import ScoringSettings
 
         settings = ScoringSettings(cross_domain_warning=False)
         guard = CrossDomainGuard(settings)

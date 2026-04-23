@@ -2,12 +2,15 @@
 
 Creates a FastMCP server instance with typed AppContext, registers
 all tools, resources, and prompts, and provides a serve() entry point.
+
+All services are initialized once during lifespan startup and shared
+across all MCP tool invocations (Blueprint §21.3).
 """
 
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import structlog
@@ -23,6 +26,14 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import Context
     from mcp.server.session import ServerSession
 
+    from github_discovery.assessment.orchestrator import AssessmentOrchestrator
+    from github_discovery.discovery.orchestrator import DiscoveryOrchestrator
+    from github_discovery.discovery.pool import PoolManager
+    from github_discovery.scoring.engine import ScoringEngine
+    from github_discovery.scoring.feature_store import FeatureStore
+    from github_discovery.scoring.ranker import Ranker
+    from github_discovery.screening.orchestrator import ScreeningOrchestrator
+
 logger = structlog.get_logger("github_discovery.mcp.server")
 
 
@@ -31,10 +42,20 @@ class AppContext:
     """Typed application context for MCP server lifespan.
 
     Provides all services needed by MCP tools via ctx.request_context.lifespan_context.
+    Services are initialized once during lifespan startup and reused across invocations.
     """
 
     settings: Settings
     session_manager: SessionManager
+    pool_manager: PoolManager
+    discovery_orch: DiscoveryOrchestrator
+    screening_orch: ScreeningOrchestrator
+    assessment_orch: AssessmentOrchestrator
+    scoring_engine: ScoringEngine
+    ranker: Ranker
+    feature_store: FeatureStore
+    # Track resources that need cleanup
+    _rest_client: object = field(default=None, repr=False)
 
 
 def get_app_context(ctx: Context[ServerSession, AppContext]) -> AppContext:
@@ -44,7 +65,22 @@ def get_app_context(ctx: Context[ServerSession, AppContext]) -> AppContext:
 
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
-    """Manage MCP server lifecycle with type-safe context."""
+    """Manage MCP server lifecycle with type-safe context.
+
+    Initializes all services once and shares them across tool invocations.
+    This follows the same pattern as the API lifespan in Phase 6.
+    """
+    from github_discovery.assessment.orchestrator import AssessmentOrchestrator
+    from github_discovery.discovery.github_client import GitHubRestClient
+    from github_discovery.discovery.orchestrator import DiscoveryOrchestrator
+    from github_discovery.discovery.pool import PoolManager
+    from github_discovery.scoring.engine import ScoringEngine
+    from github_discovery.scoring.feature_store import FeatureStore
+    from github_discovery.scoring.ranker import Ranker
+    from github_discovery.screening.gate1_metadata import Gate1MetadataScreener
+    from github_discovery.screening.gate2_static import Gate2StaticScreener
+    from github_discovery.screening.orchestrator import ScreeningOrchestrator
+
     settings = Settings()
     logger.info("mcp_server_starting", transport=settings.mcp.transport)
 
@@ -52,12 +88,45 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     session_manager = SessionManager(settings.mcp.session_store_path)
     await session_manager.initialize()
 
+    # Initialize pool manager (file-based SQLite for persistence across calls)
+    pool_manager = PoolManager(".ghdisc/pools.db")
+    await pool_manager.initialize()
+
+    # Initialize orchestrators
+    rest_client = GitHubRestClient(settings.github)
+    discovery_orch = DiscoveryOrchestrator(settings, pool_manager)
+    gate1_screener = Gate1MetadataScreener(rest_client, settings.screening)
+    gate2_screener = Gate2StaticScreener(rest_client, settings.screening, settings.github)
+    screening_orch = ScreeningOrchestrator(settings, gate1_screener, gate2_screener)
+    assessment_orch = AssessmentOrchestrator(settings)
+
+    # Initialize scoring
+    scoring_engine = ScoringEngine(settings.scoring)
+    ranker = Ranker(settings.scoring)
+    feature_store = FeatureStore(
+        db_path=".ghdisc/features.db",
+        ttl_hours=settings.scoring.feature_store_ttl_hours,
+    )
+    await feature_store.initialize()
+
     try:
         yield AppContext(
             settings=settings,
             session_manager=session_manager,
+            pool_manager=pool_manager,
+            discovery_orch=discovery_orch,
+            screening_orch=screening_orch,
+            assessment_orch=assessment_orch,
+            scoring_engine=scoring_engine,
+            ranker=ranker,
+            feature_store=feature_store,
+            _rest_client=rest_client,
         )
     finally:
+        await feature_store.close()
+        await pool_manager.close()
+        await assessment_orch.close()
+        await rest_client.close()
         await session_manager.close()
         logger.info("mcp_server_stopped")
 

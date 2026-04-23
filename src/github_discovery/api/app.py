@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 import structlog
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
@@ -52,6 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:  # noqa: PLR0915
         from github_discovery.discovery.orchestrator import DiscoveryOrchestrator
         from github_discovery.discovery.pool import PoolManager
         from github_discovery.scoring.engine import ScoringEngine
+        from github_discovery.scoring.feature_store import FeatureStore
         from github_discovery.scoring.ranker import Ranker
         from github_discovery.screening.gate1_metadata import Gate1MetadataScreener
         from github_discovery.screening.gate2_static import Gate2StaticScreener
@@ -76,7 +77,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:  # noqa: PLR0915
         screening_orch = ScreeningOrchestrator(settings, gate1_screener, gate2_screener)
 
         assessment_orch = AssessmentOrchestrator(settings)
-        scoring_engine = ScoringEngine(settings.scoring)
+
+        # Initialize scoring with persistent feature store
+        feature_store = FeatureStore(
+            db_path=".ghdisc/api_features.db",
+            ttl_hours=settings.scoring.feature_store_ttl_hours,
+        )
+        await feature_store.initialize()
+        scoring_engine = ScoringEngine(settings.scoring, store=feature_store)
         ranker = Ranker(settings.scoring)
         queue = AsyncTaskQueue(job_store)
 
@@ -104,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:  # noqa: PLR0915
         app.state.assessment_orch = assessment_orch
         app.state.scoring_engine = scoring_engine
         app.state.ranker = ranker
+        app.state.feature_store = feature_store
         app.state.worker_manager = worker_manager
 
         logger.info("api_startup_complete")
@@ -112,12 +121,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:  # noqa: PLR0915
 
         # Shutdown
         await worker_manager.stop()
+        await feature_store.close()
         await pool_manager.close()
         await job_store.close()
         await assessment_orch.close()
 
         logger.info("api_shutdown_complete")
 
+    from github_discovery.api.auth import verify_api_key
     from github_discovery.api.routes import (
         assessment_router,
         discovery_router,
@@ -125,6 +136,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:  # noqa: PLR0915
         ranking_router,
         screening_router,
     )
+
+    # Apply API key auth to all /api/v1 routes (skips health endpoints)
+    auth_dep = [Depends(verify_api_key)] if settings.api.api_key else []
 
     app = FastAPI(
         title="GitHub Discovery API",
@@ -144,12 +158,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:  # noqa: PLR0915
         ],
     )
 
-    # Register API routes
-    app.include_router(discovery_router, prefix="/api/v1")
-    app.include_router(screening_router, prefix="/api/v1")
-    app.include_router(assessment_router, prefix="/api/v1")
-    app.include_router(ranking_router, prefix="/api/v1")
-    app.include_router(export_router, prefix="/api/v1")
+    app.include_router(discovery_router, prefix="/api/v1", dependencies=auth_dep)
+    app.include_router(screening_router, prefix="/api/v1", dependencies=auth_dep)
+    app.include_router(assessment_router, prefix="/api/v1", dependencies=auth_dep)
+    app.include_router(ranking_router, prefix="/api/v1", dependencies=auth_dep)
+    app.include_router(export_router, prefix="/api/v1", dependencies=auth_dep)
 
     # CORS middleware
     app.add_middleware(

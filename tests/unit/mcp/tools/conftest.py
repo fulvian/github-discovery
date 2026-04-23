@@ -12,6 +12,47 @@ from uuid import uuid4
 
 import pytest
 
+from github_discovery.config import Settings
+from github_discovery.mcp.server import AppContext
+
+
+@pytest.fixture
+def make_app_ctx():
+    """Fixture that returns a factory for creating fully populated AppContext instances.
+
+    Usage in tests::
+
+        app_ctx = make_app_ctx(settings, mock_session_manager)
+        app_ctx = make_app_ctx(
+            settings, mock_session_manager, mock_assessment_orch=orch
+        )
+    """
+
+    def _factory(
+        settings: Settings,
+        mock_session_manager: AsyncMock,
+        mock_discovery_orch: AsyncMock | None = None,
+        mock_pool_manager: AsyncMock | None = None,
+        mock_screening_orch: AsyncMock | None = None,
+        mock_assessment_orch: AsyncMock | None = None,
+        mock_ranker: MagicMock | None = None,
+        mock_feature_store: AsyncMock | None = None,
+    ) -> AppContext:
+        """Create a fully populated AppContext with mock services."""
+        return AppContext(
+            settings=settings,
+            session_manager=mock_session_manager,
+            pool_manager=mock_pool_manager or AsyncMock(),
+            discovery_orch=mock_discovery_orch or AsyncMock(),
+            screening_orch=mock_screening_orch or AsyncMock(),
+            assessment_orch=mock_assessment_orch or AsyncMock(),
+            scoring_engine=MagicMock(),
+            ranker=mock_ranker or MagicMock(),
+            feature_store=mock_feature_store or AsyncMock(),
+        )
+
+    return _factory
+
 
 @pytest.fixture
 def mock_pool_manager():

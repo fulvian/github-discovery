@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from github_discovery.config import Settings
-from github_discovery.mcp.server import AppContext
 from github_discovery.models.enums import DomainType
 from github_discovery.models.scoring import (
     ExplainabilityReport,
@@ -21,12 +20,9 @@ class TestRankReposTool:
         settings: Settings,
         mock_session_manager: AsyncMock,
         mock_ranker: MagicMock,
+        make_app_ctx,
     ) -> None:
         """rank_repos returns ranked results."""
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
-        mock_ctx = AsyncMock()
-        mock_ctx.request_context.lifespan_context = app_ctx
-
         mock_score_results = [
             ScoreResult(
                 full_name="owner/repo-1",
@@ -38,26 +34,29 @@ class TestRankReposTool:
             ),
         ]
 
-        with (
-            patch(
-                "github_discovery.mcp.tools.ranking._load_scores_for_domain",
-                return_value=mock_score_results,
-            ),
-            patch(
-                "github_discovery.mcp.tools.ranking.Ranker",
-                return_value=mock_ranker,
-            ),
-        ):
-            from github_discovery.mcp.server import create_server
+        # Feature store mock that returns the score results
+        mock_feature_store = AsyncMock()
+        mock_feature_store.get_by_domain = AsyncMock(return_value=mock_score_results)
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["rank_repos"].fn
+        app_ctx = make_app_ctx(
+            settings,
+            mock_session_manager,
+            mock_ranker=mock_ranker,
+            mock_feature_store=mock_feature_store,
+        )
+        mock_ctx = AsyncMock()
+        mock_ctx.request_context.lifespan_context = app_ctx
 
-            result = await tool_fn(
-                domain="other",
-                session_id="test-session",
-                ctx=mock_ctx,
-            )
+        from github_discovery.mcp.server import create_server
+
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["rank_repos"].fn
+
+        result = await tool_fn(
+            domain="other",
+            session_id="test-session",
+            ctx=mock_ctx,
+        )
 
         assert result["success"] is True
         assert result["data"]["domain"] == "other"
@@ -67,22 +66,26 @@ class TestRankReposTool:
         self,
         settings: Settings,
         mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """rank_repos returns error when no scores found."""
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        mock_feature_store = AsyncMock()
+        mock_feature_store.get_by_domain = AsyncMock(return_value=[])
+
+        app_ctx = make_app_ctx(
+            settings,
+            mock_session_manager,
+            mock_feature_store=mock_feature_store,
+        )
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
-        with patch(
-            "github_discovery.mcp.tools.ranking._load_scores_for_domain",
-            return_value=[],
-        ):
-            from github_discovery.mcp.server import create_server
+        from github_discovery.mcp.server import create_server
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["rank_repos"].fn
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["rank_repos"].fn
 
-            result = await tool_fn(domain="other", ctx=mock_ctx)
+        result = await tool_fn(domain="other", ctx=mock_ctx)
 
         assert result["success"] is False
         assert "No scored results" in result["error_message"]
@@ -95,12 +98,9 @@ class TestExplainRepoTool:
         self,
         settings: Settings,
         mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """explain_repo returns explainability report."""
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
-        mock_ctx = AsyncMock()
-        mock_ctx.request_context.lifespan_context = app_ctx
-
         mock_score = ScoreResult(
             full_name="owner/repo-1",
             commit_sha="abc123",
@@ -135,6 +135,10 @@ class TestExplainRepoTool:
             mock_gen.explain = MagicMock(return_value=mock_report)
             mock_gen_cls.return_value = mock_gen
 
+            app_ctx = make_app_ctx(settings, mock_session_manager)
+            mock_ctx = AsyncMock()
+            mock_ctx.request_context.lifespan_context = app_ctx
+
             from github_discovery.mcp.server import create_server
 
             server = create_server(settings)
@@ -154,9 +158,10 @@ class TestExplainRepoTool:
         self,
         settings: Settings,
         mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """explain_repo returns error when no score found."""
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(settings, mock_session_manager)
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
@@ -185,12 +190,9 @@ class TestCompareReposTool:
         self,
         settings: Settings,
         mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """compare_repos returns side-by-side comparison."""
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
-        mock_ctx = AsyncMock()
-        mock_ctx.request_context.lifespan_context = app_ctx
-
         mock_score = ScoreResult(
             full_name="owner/repo-1",
             commit_sha="abc",
@@ -222,6 +224,10 @@ class TestCompareReposTool:
             mock_gen.explain = MagicMock(return_value=mock_report)
             mock_gen_cls.return_value = mock_gen
 
+            app_ctx = make_app_ctx(settings, mock_session_manager)
+            mock_ctx = AsyncMock()
+            mock_ctx.request_context.lifespan_context = app_ctx
+
             from github_discovery.mcp.server import create_server
 
             server = create_server(settings)
@@ -242,9 +248,10 @@ class TestCompareReposTool:
         self,
         settings: Settings,
         mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """compare_repos returns error with fewer than 2 repos."""
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(settings, mock_session_manager)
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
@@ -265,9 +272,10 @@ class TestCompareReposTool:
         self,
         settings: Settings,
         mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """compare_repos returns error with more than 5 repos."""
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(settings, mock_session_manager)
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 

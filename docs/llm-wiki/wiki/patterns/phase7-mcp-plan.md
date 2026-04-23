@@ -11,7 +11,27 @@ Confidence: high
 
 Implementation plan for the MCP-Native Integration Layer — the primary interface of GitHub Discovery.
 
-## Status: COMPLETE ✅ (1114 tests passing, 118 source files, 0 lint/type errors)
+## Status: COMPLETE ✅ (1118 tests passing, 118 source files, 0 lint/type errors)
+
+## Post-Implementation Bug Fixes (2026-04-23)
+
+After initial implementation, a thorough analysis against plans revealed 10+ issues. All fixed:
+
+### Critical Fixes
+1. **AppContext incomplete**: Lifespan only initialized 2/9 services. Fixed: all 9 services (pool_manager, discovery_orch, screening_orch, assessment_orch, scoring_engine, ranker, feature_store) now initialized in lifespan.
+2. **PoolManager persistence broken**: Each MCP tool call created in-memory PoolManager → pools lost between calls. Fixed: shared file-based PoolManager in lifespan.
+3. **Per-call service instantiation**: Tools created new orchestrators per call instead of using shared AppContext services. Fixed: all tools use `app_ctx.X` pattern.
+
+### Integration Fixes
+4. **REST API ranking endpoints were stubs**: Now call ScoringEngine+Ranker+FeatureStore for real data.
+5. **REST API auth not integrated**: `verify_api_key` dependency now applied to all `/api/v1` routes.
+6. **REST API assessment missing hard gate**: Route now checks for completed screening jobs before allowing assessment.
+7. **FeatureStore missing query methods**: Added `get_by_domain()` and `get_latest()` for ranking tools.
+8. **FeatureStore directory creation**: Added auto-creation of parent directories for file-based DBs.
+
+### Minor Fixes
+9. **Progress notifications missing message parameter**: Added descriptive messages to `report_progress()` calls.
+10. **Unused imports**: Cleaned up `ScoreDimension`, `FeatureStore`, `Ranker` from ranking tools.
 
 ## Key Architecture Decisions
 
@@ -122,10 +142,11 @@ Implementation plan for the MCP-Native Integration Layer — the primary interfa
 
 ### Implementation Quirks Discovered
 
-1. **Some tools create service instances directly** (e.g., `get_candidate_pool` creates `PoolManager()`) instead of using `app_ctx` services. This works but is inconsistent with other tools that use `app_ctx`.
+1. ~~**Some tools create service instances directly**~~ — FIXED: All tools now use shared services from AppContext.
 2. **`get_enabled_tools()` logs on every call** — 16 duplicate log lines per server creation. Cosmetic noise, not a bug.
 3. **Ruff per-file-ignores** needed for MCP tool modules: PLC0415 (deferred imports), PLR0915 (many statements), TCH (runtime type introspection), S101 (assert narrowing).
 4. **Resource templates** stored in `mcp._resource_manager._templates` (not `_resources` which is for static resources).
+5. **MCP resources are pointer stubs**: Resources (repo_score, pool_candidates, domain_ranking, session_status) return summary strings pointing to tools. Full integration would require architectural changes to pass AppContext to resource handlers — low priority since tools are the primary interface.
 
 ## See Also
 

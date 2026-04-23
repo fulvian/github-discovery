@@ -129,7 +129,7 @@ class TestMCPServerLifespan:
 
     @pytest.mark.asyncio
     async def test_app_context_creation(self, settings: Settings) -> None:
-        """app_lifespan creates AppContext with session_manager."""
+        """app_lifespan creates AppContext with all services."""
         from unittest.mock import patch
 
         from mcp.server.fastmcp import FastMCP
@@ -143,14 +143,51 @@ class TestMCPServerLifespan:
 
         real_sm = SessionManager(":memory:")
 
-        with patch(
-            "github_discovery.mcp.server.SessionManager",
-            return_value=real_sm,
+        # Mock all external services to avoid real I/O.
+        # These are function-level imports in app_lifespan, so patch
+        # the original module paths, not github_discovery.mcp.server.X.
+        mock_rest_client = AsyncMock()
+        mock_rest_client.close = AsyncMock()
+
+        mock_assessment_orch = AsyncMock()
+        mock_assessment_orch.close = AsyncMock()
+
+        with (
+            patch("github_discovery.mcp.server.SessionManager", return_value=real_sm),
+            patch("github_discovery.discovery.pool.PoolManager") as mock_pm_cls,
+            patch(
+                "github_discovery.discovery.github_client.GitHubRestClient",
+                return_value=mock_rest_client,
+            ),
+            patch("github_discovery.discovery.orchestrator.DiscoveryOrchestrator"),
+            patch("github_discovery.screening.gate1_metadata.Gate1MetadataScreener"),
+            patch("github_discovery.screening.gate2_static.Gate2StaticScreener"),
+            patch("github_discovery.screening.orchestrator.ScreeningOrchestrator"),
+            patch(
+                "github_discovery.assessment.orchestrator.AssessmentOrchestrator",
+                return_value=mock_assessment_orch,
+            ),
+            patch("github_discovery.scoring.engine.ScoringEngine"),
+            patch("github_discovery.scoring.ranker.Ranker"),
+            patch("github_discovery.scoring.feature_store.FeatureStore") as mock_fs_cls,
         ):
+            mock_pm = AsyncMock()
+            mock_pm.initialize = AsyncMock()
+            mock_pm.close = AsyncMock()
+            mock_pm_cls.return_value = mock_pm
+
+            mock_fs = AsyncMock()
+            mock_fs.initialize = AsyncMock()
+            mock_fs.close = AsyncMock()
+            mock_fs_cls.return_value = mock_fs
+
             async with app_lifespan(mcp) as ctx:
                 assert isinstance(ctx, AppContext)
                 assert ctx.settings is not None
                 assert ctx.session_manager is real_sm
+                assert ctx.pool_manager is mock_pm
+                assert ctx.ranker is not None
+                assert ctx.feature_store is mock_fs
 
     @pytest.mark.asyncio
     async def test_app_context_session_manager_closed(
@@ -167,10 +204,41 @@ class TestMCPServerLifespan:
         mcp = FastMCP("test")
         mock_sm = AsyncMock()
 
-        with patch(
-            "github_discovery.mcp.server.SessionManager",
-            return_value=mock_sm,
+        mock_rest_client = AsyncMock()
+        mock_rest_client.close = AsyncMock()
+
+        mock_assessment_orch = AsyncMock()
+        mock_assessment_orch.close = AsyncMock()
+
+        with (
+            patch("github_discovery.mcp.server.SessionManager", return_value=mock_sm),
+            patch("github_discovery.discovery.pool.PoolManager") as mock_pm_cls,
+            patch(
+                "github_discovery.discovery.github_client.GitHubRestClient",
+                return_value=mock_rest_client,
+            ),
+            patch("github_discovery.discovery.orchestrator.DiscoveryOrchestrator"),
+            patch("github_discovery.screening.gate1_metadata.Gate1MetadataScreener"),
+            patch("github_discovery.screening.gate2_static.Gate2StaticScreener"),
+            patch("github_discovery.screening.orchestrator.ScreeningOrchestrator"),
+            patch(
+                "github_discovery.assessment.orchestrator.AssessmentOrchestrator",
+                return_value=mock_assessment_orch,
+            ),
+            patch("github_discovery.scoring.engine.ScoringEngine"),
+            patch("github_discovery.scoring.ranker.Ranker"),
+            patch("github_discovery.scoring.feature_store.FeatureStore") as mock_fs_cls,
         ):
+            mock_pm = AsyncMock()
+            mock_pm.initialize = AsyncMock()
+            mock_pm.close = AsyncMock()
+            mock_pm_cls.return_value = mock_pm
+
+            mock_fs = AsyncMock()
+            mock_fs.initialize = AsyncMock()
+            mock_fs.close = AsyncMock()
+            mock_fs_cls.return_value = mock_fs
+
             async with app_lifespan(mcp) as ctx:
                 assert ctx.session_manager is mock_sm
 

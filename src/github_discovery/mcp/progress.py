@@ -25,7 +25,8 @@ async def report_discovery_progress(
     """Report progress during discovery operations."""
     if ctx is None:
         return
-    await ctx.report_progress(current, total)
+    message = f"Discovering via {channel}" if channel else "Discovering repositories"
+    await ctx.report_progress(current, total, message)
 
 
 async def report_screening_progress(
@@ -37,7 +38,8 @@ async def report_screening_progress(
     """Report progress during screening operations."""
     if ctx is None:
         return
-    await ctx.report_progress(current, total)
+    message = f"Screening gate {gate_level}" if gate_level else "Screening candidates"
+    await ctx.report_progress(current, total, message)
 
 
 async def report_assessment_progress(
@@ -50,4 +52,10 @@ async def report_assessment_progress(
     """Report progress during deep assessment."""
     if ctx is None:
         return
-    await ctx.report_progress(current, total)
+    parts = [f"Assessing {current}/{total}"]
+    if tokens_used:
+        parts.append(f"tokens: {tokens_used}")
+    if budget_remaining:
+        parts.append(f"budget remaining: {budget_remaining}")
+    message = ", ".join(parts)
+    await ctx.report_progress(current, total, message)

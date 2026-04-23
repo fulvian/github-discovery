@@ -12,7 +12,6 @@ import structlog
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.session import ServerSession
 
-from github_discovery.discovery.pool import PoolManager
 from github_discovery.discovery.types import DiscoveryQuery
 from github_discovery.mcp.config import should_register_tool
 from github_discovery.mcp.output_format import format_tool_result, truncate_for_context
@@ -80,13 +79,8 @@ def register_discovery_tools(mcp: FastMCP, settings: Settings) -> None:
                 session_id=session.session_id,
             )
 
-            # Build orchestrator from settings
-            from github_discovery.discovery.orchestrator import DiscoveryOrchestrator
-
-            pool_manager = PoolManager()
-            orch = DiscoveryOrchestrator(app_ctx.settings, pool_manager)
-            result = await orch.discover(discovery_query)
-            await pool_manager.close()
+            # Use shared orchestrator from AppContext
+            result = await app_ctx.discovery_orch.discover(discovery_query)
 
             # Update session
             session.pool_ids.append(result.pool_id)
@@ -142,13 +136,10 @@ def register_discovery_tools(mcp: FastMCP, settings: Settings) -> None:
                 offset: Pagination offset
                 ctx: MCP request context (injected by FastMCP)
             """
-            _require_ctx(ctx)
+            real_ctx = _require_ctx(ctx)
+            app_ctx = get_app_context(real_ctx)
 
-            pool_manager = PoolManager()
-            try:
-                pool = await pool_manager.get_pool(pool_id)
-            finally:
-                await pool_manager.close()
+            pool = await app_ctx.pool_manager.get_pool(pool_id)
 
             if not pool:
                 return format_tool_result(
@@ -229,12 +220,8 @@ def register_discovery_tools(mcp: FastMCP, settings: Settings) -> None:
                 session_id=session.session_id,
             )
 
-            from github_discovery.discovery.orchestrator import DiscoveryOrchestrator
-
-            pool_manager = PoolManager()
-            orch = DiscoveryOrchestrator(app_ctx.settings, pool_manager)
-            result = await orch.discover(discovery_query)
-            await pool_manager.close()
+            # Use shared orchestrator from AppContext
+            result = await app_ctx.discovery_orch.discover(discovery_query)
 
             session.pool_ids.append(result.pool_id)
             session.discovered_repo_count += result.total_candidates

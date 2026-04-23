@@ -127,24 +127,17 @@ def register_assessment_tools(mcp: FastMCP, settings: Settings) -> None:
                     ),
                 )
 
-            # Run deep assessment
-            from github_discovery.assessment.orchestrator import (
-                AssessmentOrchestrator,
+            # Run deep assessment using shared orchestrator
+            assess_orch = app_ctx.assessment_orch
+            assess_ctx = AssessmentContext(
+                candidates=eligible_candidates,
+                screening_results=screening_results,
+                dimensions=resolved_dims,
+                gate3_threshold=gate3_threshold,
+                session_id=session.session_id,
             )
 
-            assess_orch = AssessmentOrchestrator(app_ctx.settings)
-            try:
-                assess_ctx = AssessmentContext(
-                    candidates=eligible_candidates,
-                    screening_results=screening_results,
-                    dimensions=resolved_dims,
-                    gate3_threshold=gate3_threshold,
-                    session_id=session.session_id,
-                )
-
-                results = await assess_orch.assess(assess_ctx)
-            finally:
-                await assess_orch.close()
+            results = await assess_orch.assess(assess_ctx)
 
             # Update session
             session.assessed_repo_count += len(results)
@@ -243,18 +236,10 @@ def register_assessment_tools(mcp: FastMCP, settings: Settings) -> None:
 
             resolved_dims = _resolve_dimensions(dimensions)
 
-            from github_discovery.assessment.orchestrator import (
-                AssessmentOrchestrator,
+            result = await app_ctx.assessment_orch.quick_assess(
+                candidate,
+                dimensions=resolved_dims,
             )
-
-            assess_orch = AssessmentOrchestrator(app_ctx.settings)
-            try:
-                result = await assess_orch.quick_assess(
-                    candidate,
-                    dimensions=resolved_dims,
-                )
-            finally:
-                await assess_orch.close()
 
             return format_tool_result(
                 summary=(
@@ -301,15 +286,7 @@ def register_assessment_tools(mcp: FastMCP, settings: Settings) -> None:
                     error_message=f"Invalid repository URL: {repo_url}",
                 )
 
-            from github_discovery.assessment.orchestrator import (
-                AssessmentOrchestrator,
-            )
-
-            assess_orch = AssessmentOrchestrator(app_ctx.settings)
-            try:
-                cache_size = assess_orch.cache_size
-            finally:
-                await assess_orch.close()
+            cache_size = app_ctx.assessment_orch.cache_size
 
             return format_tool_result(
                 summary=(
@@ -332,30 +309,15 @@ async def _screen_for_hard_gate(
 ) -> dict[str, ScreeningResult]:
     """Screen candidates for hard gate enforcement before Gate 3.
 
+    Uses the shared ScreeningOrchestrator from AppContext.
     Returns dict of ScreeningResult keyed by full_name.
     """
-    from github_discovery.discovery.github_client import GitHubRestClient
-    from github_discovery.screening.gate1_metadata import (
-        Gate1MetadataScreener,
-    )
-    from github_discovery.screening.gate2_static import Gate2StaticScreener
-    from github_discovery.screening.orchestrator import ScreeningOrchestrator
-
-    rest_client = GitHubRestClient(app_ctx.settings.github)
-    gate1 = Gate1MetadataScreener(rest_client, app_ctx.settings.screening)
-    gate2 = Gate2StaticScreener(
-        rest_client,
-        app_ctx.settings.screening,
-        app_ctx.settings.github,
-    )
-    orch = ScreeningOrchestrator(app_ctx.settings, gate1, gate2)
-
     screen_ctx = ScreeningContext(
         pool_id="deep-assess-hard-gate",
         candidates=candidates,
         gate_level=GateLevel.STATIC_SECURITY,
     )
-    results: list[ScreeningResult] = await orch.screen(screen_ctx)
+    results: list[ScreeningResult] = await app_ctx.screening_orch.screen(screen_ctx)
     return {r.full_name: r for r in results}
 
 

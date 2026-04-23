@@ -10,6 +10,21 @@ from github_discovery.config import Settings
 from github_discovery.mcp.server import AppContext, create_server, get_app_context
 
 
+def _make_app_context(settings: Settings | None = None) -> AppContext:
+    """Create a fully populated AppContext with mock services."""
+    return AppContext(
+        settings=settings or Settings(),
+        session_manager=AsyncMock(),
+        pool_manager=AsyncMock(),
+        discovery_orch=AsyncMock(),
+        screening_orch=AsyncMock(),
+        assessment_orch=AsyncMock(),
+        scoring_engine=MagicMock(),
+        ranker=MagicMock(),
+        feature_store=AsyncMock(),
+    )
+
+
 class TestCreateServer:
     """Tests for create_server factory function."""
 
@@ -65,18 +80,19 @@ class TestAppContext:
     """Tests for AppContext dataclass."""
 
     def test_app_context_dataclass_fields(self) -> None:
-        """AppContext has settings and session_manager fields."""
-        mock_sm = AsyncMock()
+        """AppContext has all required fields."""
         settings = Settings()
-        ctx = AppContext(settings=settings, session_manager=mock_sm)
+        ctx = _make_app_context(settings)
         assert ctx.settings is settings
-        assert ctx.session_manager is mock_sm
+        assert ctx.session_manager is not None
+        assert ctx.pool_manager is not None
+        assert ctx.ranker is not None
+        assert ctx.feature_store is not None
 
     def test_app_context_stores_settings_correctly(self) -> None:
         """AppContext preserves the exact Settings instance."""
         settings = Settings()
-        mock_sm = AsyncMock()
-        ctx = AppContext(settings=settings, session_manager=mock_sm)
+        ctx = _make_app_context(settings)
         assert ctx.settings.app_name == "github-discovery"
 
 
@@ -85,9 +101,8 @@ class TestGetAppContext:
 
     def test_get_app_context_extracts_from_request(self) -> None:
         """get_app_context returns lifespan_context from request."""
-        mock_sm = AsyncMock()
         settings = Settings()
-        expected = AppContext(settings=settings, session_manager=mock_sm)
+        expected = _make_app_context(settings)
 
         mock_request_context = MagicMock()
         mock_request_context.lifespan_context = expected

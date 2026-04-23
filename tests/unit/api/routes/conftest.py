@@ -18,6 +18,7 @@ from github_discovery.api.deps import (
     get_job_store,
     get_pool_manager,
     get_queue,
+    get_ranker,
     get_scoring_engine,
 )
 from github_discovery.config import APISettings, Settings
@@ -56,7 +57,18 @@ def mock_pool_manager() -> AsyncMock:
 
 @pytest.fixture
 def mock_scoring_engine() -> MagicMock:
-    """Create a mock ScoringEngine (sync methods, not async)."""
+    """Create a mock ScoringEngine with a mock FeatureStore."""
+    engine = MagicMock()
+    mock_store = AsyncMock()
+    mock_store.get_by_domain = AsyncMock(return_value=[])
+    mock_store.get_latest = AsyncMock(return_value=None)
+    engine.feature_store = mock_store
+    return engine
+
+
+@pytest.fixture
+def mock_ranker() -> MagicMock:
+    """Create a mock Ranker."""
     return MagicMock()
 
 
@@ -66,6 +78,7 @@ def app_with_overrides(
     mock_queue: AsyncMock,
     mock_pool_manager: AsyncMock,
     mock_scoring_engine: MagicMock,
+    mock_ranker: MagicMock,
 ) -> Generator[FastAPI]:
     """Create a FastAPI app with dependency overrides for route tests.
 
@@ -84,6 +97,7 @@ def app_with_overrides(
     application.dependency_overrides[get_queue] = lambda: mock_queue
     application.dependency_overrides[get_pool_manager] = lambda: mock_pool_manager
     application.dependency_overrides[get_scoring_engine] = lambda: mock_scoring_engine
+    application.dependency_overrides[get_ranker] = lambda: mock_ranker
 
     yield application
 

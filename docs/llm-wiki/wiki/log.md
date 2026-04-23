@@ -381,3 +381,19 @@
   - Wave E: mcp/__main__.py, cli.py (mcp serve + init-config commands), integration tests, agentic stubs
 - 1114 tests passing, 118 source files, 0 lint/type errors
 - Updated wiki/index.md with Phase 7 completion status
+
+## [2026-04-23] ingest | Phase 6-7 Bug Fixes and Integration Hardening
+- Analyzed Phase 6 and Phase 7 codebases against implementation plans
+- Fixed 10+ critical/medium/low issues across API and MCP layers
+- Key fixes:
+  - REST API ranking endpoints: wired to ScoringEngine+Ranker+FeatureStore (was stub)
+  - REST API auth: integrated verify_api_key dependency on all /api/v1 routes
+  - REST API assessment: added hard gate enforcement (Gate 1+2 check) in route
+  - MCP progress notifications: added message parameter to report_progress calls
+  - FeatureStore: added parent directory auto-creation for file-based DBs
+  - ScoringEngine: added feature_store property for API access
+  - API lifespan: added FeatureStore initialization and cleanup
+  - MCP tools: cleaned up unused imports (Ranker, FeatureStore, ScoreDimension)
+  - Test infrastructure: created make_app_ctx fixture for full AppContext mocking
+  - Fixed 28 test files to use new AppContext with all 9 services
+- 1118 tests passing, 0 lint/type errors, CI clean

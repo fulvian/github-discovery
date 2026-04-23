@@ -7,11 +7,19 @@ from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 
 from github_discovery.workers.types import JobStatus
-from tests.unit.api.routes.conftest import make_assessment_job
+from tests.unit.api.routes.conftest import make_assessment_job, make_screening_job
 
 
-def test_start_assessment_returns_202(client: TestClient) -> None:
+def test_start_assessment_returns_202(
+    client: TestClient,
+    mock_job_store: AsyncMock,
+) -> None:
     """POST /api/v1/assess should return 202 Accepted."""
+    # Gate check requires at least one completed screening job
+    mock_job_store.list_jobs = AsyncMock(
+        return_value=[make_screening_job(status=JobStatus.COMPLETED)],
+    )
+
     response = client.post(
         "/api/v1/assess",
         json={"repo_urls": ["https://github.com/test/repo"]},
@@ -19,8 +27,15 @@ def test_start_assessment_returns_202(client: TestClient) -> None:
     assert response.status_code == 202
 
 
-def test_start_assessment_returns_job_id(client: TestClient) -> None:
+def test_start_assessment_returns_job_id(
+    client: TestClient,
+    mock_job_store: AsyncMock,
+) -> None:
     """POST /api/v1/assess should return a job_id in the response."""
+    mock_job_store.list_jobs = AsyncMock(
+        return_value=[make_screening_job(status=JobStatus.COMPLETED)],
+    )
+
     response = client.post(
         "/api/v1/assess",
         json={"repo_urls": ["https://github.com/test/repo"]},
@@ -81,8 +96,15 @@ def test_get_assessment_status_not_found(client: TestClient) -> None:
     assert response.status_code == 404
 
 
-def test_start_assessment_with_dimensions(client: TestClient) -> None:
+def test_start_assessment_with_dimensions(
+    client: TestClient,
+    mock_job_store: AsyncMock,
+) -> None:
     """POST /api/v1/assess should accept dimensions parameter."""
+    mock_job_store.list_jobs = AsyncMock(
+        return_value=[make_screening_job(status=JobStatus.COMPLETED)],
+    )
+
     response = client.post(
         "/api/v1/assess",
         json={
@@ -95,8 +117,15 @@ def test_start_assessment_with_dimensions(client: TestClient) -> None:
     assert data["status"] == "pending"
 
 
-def test_start_assessment_with_budget(client: TestClient) -> None:
+def test_start_assessment_with_budget(
+    client: TestClient,
+    mock_job_store: AsyncMock,
+) -> None:
     """POST /api/v1/assess should accept budget_tokens parameter."""
+    mock_job_store.list_jobs = AsyncMock(
+        return_value=[make_screening_job(status=JobStatus.COMPLETED)],
+    )
+
     response = client.post(
         "/api/v1/assess",
         json={

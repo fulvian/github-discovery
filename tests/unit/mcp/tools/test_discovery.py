@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 from github_discovery.config import Settings
-from github_discovery.mcp.server import AppContext
 
 
 class TestDiscoverReposTool:
@@ -16,6 +15,7 @@ class TestDiscoverReposTool:
         settings: Settings,
         mock_session_manager: AsyncMock,
         mock_discovery_orchestrator: tuple,
+        make_app_ctx,
     ) -> None:
         """discover_repos returns formatted result with pool_id."""
         from github_discovery.models.session import SessionState
@@ -25,19 +25,17 @@ class TestDiscoverReposTool:
         mock_session_manager.get_or_create = AsyncMock(return_value=session)
         mock_session_manager.update = AsyncMock()
 
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(settings, mock_session_manager, mock_discovery_orch=mock_orch)
 
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
-
-        mock_pm = AsyncMock()
 
         with (
             patch(
                 "github_discovery.discovery.orchestrator.DiscoveryOrchestrator",
                 return_value=mock_orch,
             ),
-            patch("github_discovery.discovery.pool.PoolManager", return_value=mock_pm),
+            patch("github_discovery.discovery.pool.PoolManager", return_value=AsyncMock()),
         ):
             from github_discovery.mcp.server import create_server
 
@@ -60,6 +58,7 @@ class TestDiscoverReposTool:
         settings: Settings,
         mock_session_manager: AsyncMock,
         mock_discovery_orchestrator: tuple,
+        make_app_ctx,
     ) -> None:
         """discover_repos uses provided session_id."""
         from github_discovery.models.session import SessionState
@@ -69,18 +68,16 @@ class TestDiscoverReposTool:
         mock_session_manager.get_or_create = AsyncMock(return_value=existing_session)
         mock_session_manager.update = AsyncMock()
 
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(settings, mock_session_manager, mock_discovery_orch=mock_orch)
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
-
-        mock_pm = AsyncMock()
 
         with (
             patch(
                 "github_discovery.discovery.orchestrator.DiscoveryOrchestrator",
                 return_value=mock_orch,
             ),
-            patch("github_discovery.discovery.pool.PoolManager", return_value=mock_pm),
+            patch("github_discovery.discovery.pool.PoolManager", return_value=AsyncMock()),
         ):
             from github_discovery.mcp.server import create_server
 
@@ -106,19 +103,23 @@ class TestGetCandidatePoolTool:
     async def test_get_candidate_pool_happy_path(
         self,
         settings: Settings,
+        mock_session_manager: AsyncMock,
         mock_pool_manager: tuple,
+        make_app_ctx,
     ) -> None:
         """get_candidate_pool returns candidates from pool."""
         mock_pm, pool_id = mock_pool_manager
 
-        # Patch at the module level where PoolManager is imported
-        with patch("github_discovery.mcp.tools.discovery.PoolManager", return_value=mock_pm):
-            from github_discovery.mcp.server import create_server
+        app_ctx = make_app_ctx(settings, mock_session_manager, mock_pool_manager=mock_pm)
+        mock_ctx = AsyncMock()
+        mock_ctx.request_context.lifespan_context = app_ctx
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["get_candidate_pool"].fn
+        from github_discovery.mcp.server import create_server
 
-            result = await tool_fn(pool_id=pool_id, ctx=AsyncMock())
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["get_candidate_pool"].fn
+
+        result = await tool_fn(pool_id=pool_id, ctx=mock_ctx)
 
         assert result["success"] is True
         assert result["data"]["total_count"] == 2
@@ -127,19 +128,24 @@ class TestGetCandidatePoolTool:
     async def test_get_candidate_pool_not_found(
         self,
         settings: Settings,
+        mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """get_candidate_pool returns error for missing pool."""
         mock_pm = AsyncMock()
         mock_pm.get_pool = AsyncMock(return_value=None)
         mock_pm.close = AsyncMock()
 
-        with patch("github_discovery.mcp.tools.discovery.PoolManager", return_value=mock_pm):
-            from github_discovery.mcp.server import create_server
+        app_ctx = make_app_ctx(settings, mock_session_manager, mock_pool_manager=mock_pm)
+        mock_ctx = AsyncMock()
+        mock_ctx.request_context.lifespan_context = app_ctx
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["get_candidate_pool"].fn
+        from github_discovery.mcp.server import create_server
 
-            result = await tool_fn(pool_id="nonexistent", ctx=AsyncMock())
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["get_candidate_pool"].fn
+
+        result = await tool_fn(pool_id="nonexistent", ctx=mock_ctx)
 
         assert result["success"] is False
         assert "not found" in result["error_message"]
@@ -153,6 +159,7 @@ class TestExpandSeedsTool:
         settings: Settings,
         mock_session_manager: AsyncMock,
         mock_discovery_orchestrator: tuple,
+        make_app_ctx,
     ) -> None:
         """expand_seeds returns formatted result."""
         from github_discovery.models.session import SessionState
@@ -162,18 +169,16 @@ class TestExpandSeedsTool:
         mock_session_manager.get_or_create = AsyncMock(return_value=session)
         mock_session_manager.update = AsyncMock()
 
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(settings, mock_session_manager, mock_discovery_orch=mock_orch)
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
-
-        mock_pm = AsyncMock()
 
         with (
             patch(
                 "github_discovery.discovery.orchestrator.DiscoveryOrchestrator",
                 return_value=mock_orch,
             ),
-            patch("github_discovery.discovery.pool.PoolManager", return_value=mock_pm),
+            patch("github_discovery.discovery.pool.PoolManager", return_value=AsyncMock()),
         ):
             from github_discovery.mcp.server import create_server
 

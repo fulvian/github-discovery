@@ -103,6 +103,11 @@ class ScoringEngine:
         self._confidence_calc = ConfidenceCalculator()
         self._value_calc = ValueScoreCalculator(self._settings)
 
+    @property
+    def feature_store(self) -> FeatureStore | None:
+        """Return the backing FeatureStore, if configured."""
+        return self._store
+
     def score(
         self,
         candidate: RepoCandidate,

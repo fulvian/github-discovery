@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 from github_discovery.config import Settings
-from github_discovery.mcp.server import AppContext
 from github_discovery.models.screening import (
     MetadataScreenResult,
     ScreeningResult,
@@ -22,13 +21,18 @@ class TestDeepAssessTool:
         settings: Settings,
         mock_session_manager: AsyncMock,
         mock_assessment_orchestrator: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """deep_assess returns assessment results for eligible candidates."""
         session = SessionState(name="assess")
         mock_session_manager.get_or_create = AsyncMock(return_value=session)
         mock_session_manager.update = AsyncMock()
 
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(
+            settings,
+            mock_session_manager,
+            mock_assessment_orch=mock_assessment_orchestrator,
+        )
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
@@ -49,15 +53,9 @@ class TestDeepAssessTool:
             ),
         }
 
-        with (
-            patch(
-                "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
-                return_value=screening_results,
-            ),
-            patch(
-                "github_discovery.assessment.orchestrator.AssessmentOrchestrator",
-                return_value=mock_assessment_orchestrator,
-            ),
+        with patch(
+            "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
+            return_value=screening_results,
         ):
             from github_discovery.mcp.server import create_server
 
@@ -77,12 +75,13 @@ class TestDeepAssessTool:
         self,
         settings: Settings,
         mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """deep_assess returns error when no candidates pass hard gate."""
         session = SessionState(name="assess")
         mock_session_manager.get_or_create = AsyncMock(return_value=session)
 
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(settings, mock_session_manager)
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
@@ -124,12 +123,13 @@ class TestDeepAssessTool:
         self,
         settings: Settings,
         mock_session_manager: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """deep_assess returns error for empty valid URLs."""
         session = SessionState(name="assess")
         mock_session_manager.get_or_create = AsyncMock(return_value=session)
 
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(settings, mock_session_manager)
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
@@ -153,25 +153,26 @@ class TestQuickAssessTool:
         settings: Settings,
         mock_session_manager: AsyncMock,
         mock_assessment_orchestrator: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """quick_assess returns assessment for single repo."""
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(
+            settings,
+            mock_session_manager,
+            mock_assessment_orch=mock_assessment_orchestrator,
+        )
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
-        with patch(
-            "github_discovery.assessment.orchestrator.AssessmentOrchestrator",
-            return_value=mock_assessment_orchestrator,
-        ):
-            from github_discovery.mcp.server import create_server
+        from github_discovery.mcp.server import create_server
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["quick_assess"].fn
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["quick_assess"].fn
 
-            result = await tool_fn(
-                repo_url="https://github.com/owner/repo-1",
-                ctx=mock_ctx,
-            )
+        result = await tool_fn(
+            repo_url="https://github.com/owner/repo-1",
+            ctx=mock_ctx,
+        )
 
         assert result["success"] is True
         assert result["data"]["repo"] == "owner/repo-1"
@@ -186,25 +187,26 @@ class TestGetAssessmentTool:
         settings: Settings,
         mock_session_manager: AsyncMock,
         mock_assessment_orchestrator: AsyncMock,
+        make_app_ctx,
     ) -> None:
         """get_assessment returns cache size info."""
-        app_ctx = AppContext(settings=settings, session_manager=mock_session_manager)
+        app_ctx = make_app_ctx(
+            settings,
+            mock_session_manager,
+            mock_assessment_orch=mock_assessment_orchestrator,
+        )
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
-        with patch(
-            "github_discovery.assessment.orchestrator.AssessmentOrchestrator",
-            return_value=mock_assessment_orchestrator,
-        ):
-            from github_discovery.mcp.server import create_server
+        from github_discovery.mcp.server import create_server
 
-            server = create_server(settings)
-            tool_fn = server._tool_manager._tools["get_assessment"].fn
+        server = create_server(settings)
+        tool_fn = server._tool_manager._tools["get_assessment"].fn
 
-            result = await tool_fn(
-                repo_url="https://github.com/owner/repo-1",
-                ctx=mock_ctx,
-            )
+        result = await tool_fn(
+            repo_url="https://github.com/owner/repo-1",
+            ctx=mock_ctx,
+        )
 
         assert result["success"] is True
         assert result["data"]["cache_size"] == 5

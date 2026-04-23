@@ -551,7 +551,7 @@ class TestOrchestratorProperties:
     def test_budget_controller_property(self) -> None:
         """budget_controller returns the internal BudgetController."""
         orchestrator = _make_orchestrator()
-        from github_discovery.assessment.budget_controller import BudgetController  # noqa: PLC0415
+        from github_discovery.assessment.budget_controller import BudgetController
 
         assert isinstance(orchestrator.budget_controller, BudgetController)
 
