@@ -218,6 +218,32 @@ class MCPSettings(BaseSettings):
         description="Read-only mode for analysis pipelines",
     )
 
+    # --- Phase 7 new fields ---
+    session_store_path: str = Field(
+        default=".ghdisc/sessions.db",
+        description="SQLite database path for session persistence",
+    )
+    enabled_toolsets: list[str] = Field(
+        default_factory=lambda: ["discovery", "screening", "assessment", "ranking", "session"],
+        description="Enabled MCP tool categories",
+    )
+    exclude_tools: list[str] = Field(
+        default_factory=list,
+        description="Specific tool names to exclude",
+    )
+    json_response: bool = Field(
+        default=True,
+        description="Use JSON structured content for tool responses",
+    )
+    stateless_http: bool = Field(
+        default=False,
+        description="Use stateless HTTP mode (for production deployment)",
+    )
+    streamable_http_path: str = Field(
+        default="/mcp",
+        description="Path for streamable HTTP transport endpoint",
+    )
+
 
 class APISettings(BaseSettings):
     """API server settings."""

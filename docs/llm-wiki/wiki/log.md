@@ -350,3 +350,34 @@
 - Wave D: Integration — rate limiting, API key auth, export routes, OpenAPI tags (22 tests)
 - 127 new tests (990 total), make ci green
 - Updated wiki/patterns/phase6-api-worker-plan.md status to COMPLETE
+
+## [2026-04-23] ingest | Phase 7 MCP Integration Layer Implementation Plan
+- Created docs/plans/phase7-implementation-plan.md
+- Context7 verification of MCP Python SDK v1.x (FastMCP, tools, resources, prompts, Context, progress notifications, transport, structured content) and GitHub MCP Server (toolsets, read-only, lockdown, dynamic-toolsets)
+- Key architecture decisions:
+  - FastMCP server with lifespan pattern: AppContext dataclass with typed services
+  - 16 tools across 5 files (discovery, screening, assessment, ranking, session)
+  - 4 resources with URI templates (repo://, pool://, rank://, session://)
+  - 5 prompts as agent skill definitions (discover_underrated, quick_quality_check, compare_for_adoption, domain_deep_dive, security_audit)
+  - SessionManager: SQLite-backed session persistence for cross-session progressive deepening
+  - Context-efficient output: format_tool_result() wrapper, truncate_for_context() for token budget
+  - Progress notifications: ctx.report_progress() wrappers per phase
+  - GitHub MCP composition: config generation for kilo/opencode/claude targets
+  - Transport: stdio (default, local agents) + streamable-http (deployment)
+  - New dependency: mcp>=1.6
+  - MCPSettings extended: session_store_path, enabled_toolsets, exclude_tools, json_response, stateless_http, streamable_http_path
+- 13 tasks across 5 implementation waves (A-E)
+- ~120 new tests planned across 17 test files
+- All existing mcp/*.py stubs will be replaced with full implementations
+- Updated wiki/index.md with Phase 7 plan reference
+
+## [2026-04-23] ingest | Phase 7 MCP Integration — Implementation Complete
+- Updated wiki/patterns/phase7-mcp-plan.md: status changed from PLAN to COMPLETE
+- All 5 waves (A-E) implemented and verified:
+  - Wave A: server.py, session.py, output_format.py, progress.py, config.py, transport.py
+  - Wave B: tools/discovery.py, tools/screening.py
+  - Wave C: tools/assessment.py, tools/ranking.py, tools/session.py
+  - Wave D: resources/ (4 URI templates), prompts.py (5 agent skills), github_client.py
+  - Wave E: mcp/__main__.py, cli.py (mcp serve + init-config commands), integration tests, agentic stubs
+- 1114 tests passing, 118 source files, 0 lint/type errors
+- Updated wiki/index.md with Phase 7 completion status

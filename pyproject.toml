@@ -28,7 +28,7 @@ dependencies = [
     "httpx>=0.28",
     "structlog>=24.1",
     "typer>=0.12",
-    "mcp>=1.0",
+    "mcp>=1.6",
     "aiosqlite>=0.20",
     "repomix>=0.1.0",
     "openai>=1.30",
@@ -94,9 +94,18 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*" = ["S101", "D", "ANN", "PLR2004", "TCH"]
+"tests/**/*" = ["S101", "D", "ANN", "PLR2004", "TCH", "PLC0415"]
 "__init__.py" = ["F401"]
 "src/github_discovery/api/app.py" = ["PLC0415"]  # Deferred imports in lifespan
+"src/github_discovery/cli.py" = ["PLC0415", "PLR2004"]  # Deferred imports in CLI commands
+"src/github_discovery/mcp/server.py" = ["PLC0415"]  # Deferred imports in create_server
+"src/github_discovery/mcp/resources/__init__.py" = ["PLC0415"]  # Deferred imports
+"src/github_discovery/mcp/tools/__init__.py" = ["PLC0415"]  # Deferred imports
+"src/github_discovery/mcp/tools/assessment.py" = ["PLC0415", "PLR0915", "TCH"]  # MCP tool registration; runtime type introspection
+"src/github_discovery/mcp/tools/discovery.py" = ["PLC0415", "PLR0915", "TCH"]  # MCP tool registration; runtime type introspection
+"src/github_discovery/mcp/tools/ranking.py" = ["PLC0415", "PLR0915", "TCH"]  # MCP tool registration; runtime type introspection
+"src/github_discovery/mcp/tools/screening.py" = ["PLC0415", "PLR0915", "S101", "TCH"]  # MCP tool registration; runtime type introspection
+"src/github_discovery/mcp/tools/session.py" = ["PLC0415", "S101", "TCH"]  # MCP tool registration; runtime type introspection
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]

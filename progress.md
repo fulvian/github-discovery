@@ -343,3 +343,63 @@
 - `tests/unit/api/` — 9 new test files (67 tests)
 - `tests/unit/workers/` — 7 new test files (60 tests)
 - `docs/llm-wiki/wiki/` — Updated phase6 plan status
+
+## Session: 2026-04-23 (Phase 7 Implementation)
+
+### 19:30 — Phase 7 MCP-Native Integration Layer Complete
+- Implemented all 13 tasks from `docs/plans/phase7-implementation-plan.md`
+- 1114 tests passing (124 new MCP tests + 990 pre-existing), `make ci` green
+- ruff check ✅ | mypy --strict (118 files) ✅ | pytest 1114/1114 ✅
+
+### Implementation Waves
+
+**Wave A — Foundation (~25 tests)**:
+- `mcp/server.py` — FastMCP factory, AppContext dataclass, app_lifespan, create_server, serve
+- `mcp/session.py` — SessionManager with SQLite CRUD (initialize/close/get_or_create/update/delete/list_sessions)
+- `mcp/output_format.py` — format_tool_result() + truncate_for_context()
+- `mcp/progress.py` — report_discovery/screening/assessment_progress()
+- `mcp/config.py` — ALL_TOOLS, TOOLSET_MAP, get_enabled_tools(), should_register_tool()
+- `mcp/transport.py` — get_transport_args() for stdio + streamable-http
+- `mcp/__init__.py` — Exports create_server, serve
+
+**Wave B — Discovery + Screening Tools (~25 tests)**:
+- `mcp/tools/discovery.py` — discover_repos, get_candidate_pool, expand_seeds
+- `mcp/tools/screening.py` — screen_candidates, get_shortlist, quick_screen
+
+**Wave C — Assessment + Ranking + Session Tools (~35 tests)**:
+- `mcp/tools/assessment.py` — deep_assess, quick_assess, get_assessment
+- `mcp/tools/ranking.py` — rank_repos, explain_repo, compare_repos
+- `mcp/tools/session.py` — create_session, get_session, list_sessions, export_session
+
+**Wave D — Resources + Prompts + Composition (~25 tests)**:
+- `mcp/resources/repo_score.py` — `repo://{owner}/{name}/score` resource template
+- `mcp/resources/pool_candidates.py` — `pool://{pool_id}/candidates` resource template
+- `mcp/resources/domain_ranking.py` — `rank://{domain}/top` resource template
+- `mcp/resources/session_status.py` — `session://{session_id}/status` resource template
+- `mcp/prompts.py` — 5 prompt skills (discover_underrated, quick_quality_check, compare_for_adoption, domain_deep_dive, security_audit)
+- `mcp/github_client.py` — get_composition_config() for kilo/opencode/claude targets
+
+**Wave E — CLI Integration & Tests (15 tests)**:
+- `mcp/__main__.py` — Entry point for `python -m github_discovery.mcp serve`
+- `cli.py` — Updated with `mcp` subcommand: `serve` (start server) + `init-config` (generate config)
+- `tests/integration/test_mcp_server.py` — 12 integration tests
+- `tests/agentic/test_mcp_client.py` — 3 stub tests (skipped, future MCP client)
+
+### Key Implementation Decisions
+- AppContext contains only `settings` + `session_manager`; tools create orchestrators/pool_managers per invocation (stateless)
+- Tool filtering: `should_register_tool()` checks both `enabled_toolsets` and `exclude_tools`
+- Ruff per-file-ignores needed for MCP tool modules: PLC0415, PLR0915, TCH, S101
+- MCPSettings extended with 6 fields: session_store_path, enabled_toolsets, exclude_tools, json_response, stateless_http, streamable_http_path
+- Resource templates stored in `mcp._resource_manager._templates` (not `_resources`)
+- CLI `mcp serve` overrides Settings transport/host/port from CLI flags
+
+### Files Created/Modified
+- `pyproject.toml` — Added mcp>=1.6, per-file-ignores for MCP modules
+- `src/github_discovery/config.py` — MCPSettings extended with 6 new fields
+- `src/github_discovery/cli.py` — Full CLI with mcp serve + init-config commands
+- `src/github_discovery/mcp/` — 20 source files (server, session, tools, resources, prompts, config, transport, etc.)
+- `tests/unit/mcp/` — 22 unit test files
+- `tests/integration/test_mcp_server.py` — 12 integration tests
+- `tests/agentic/test_mcp_client.py` — 3 stub tests
+- `docs/llm-wiki/wiki/` — Updated phase7 plan, index, log
+- `.workflow/state.md` — Phase 7 completion
