@@ -77,6 +77,31 @@ Questo crea un bias sistematico che esclude progetti tecnicamente eccellenti ma 
 - [x] `screening/__init__.py` exports updated with all 16 public classes
 - [x] `make ci` green: ruff + mypy --strict + 459 tests passing
 
+### Phase 4: Deep Technical Assessment (Layer C) [complete]
+- [x] Phase 4 implementation plan created: `docs/plans/phase4-implementation-plan.md`
+- [x] 13 implementation tasks completed (repomix, LLM provider, prompts, parser, heuristics, budget, orchestrator, lang_analyzers)
+- [x] Post-implementation verification: 8 bugs fixed, 26 prompt tests added
+- [x] `make ci` green: ruff + mypy --strict + 863 tests passing
+
+### Phase 5: Scoring, Ranking & Explainability (Layer D) [complete]
+- [x] Phase 5 implementation plan created: `docs/plans/phase5-implementation-plan.md`
+- [x] 8 tasks completed (ScoringEngine, ProfileRegistry, ValueScoreCalculator, ConfidenceCalculator, Ranker, CrossDomainGuard, ExplainabilityGenerator, FeatureStore)
+- [x] Post-implementation verification: 8 bugs fixed, 53 new tests
+- [x] `make ci` green: ruff + mypy --strict + 863 tests passing
+
+### Phase 6: API & Worker Infrastructure [planning]
+- [x] Phase 6 implementation plan created: `docs/plans/phase6-implementation-plan.md`
+- [ ] Task 6.1 — FastAPI application setup (app factory, lifespan, middleware, error handlers)
+- [ ] Task 6.2 — Discovery API endpoints (POST discover, GET status, GET candidates)
+- [ ] Task 6.3 — Screening API endpoints (POST screen, GET status, GET shortlist)
+- [ ] Task 6.4 — Assessment API endpoints (POST assess, hard gate enforcement)
+- [ ] Task 6.5 — Ranking & query API endpoints (GET rank, GET repo detail, GET explain)
+- [ ] Task 6.6 — Scoring workers (Discovery, Screening, Assessment workers)
+- [ ] Task 6.7 — Task queue integration (JobStore, AsyncTaskQueue)
+- [ ] Task 6.8 — Rate limiting & auth middleware
+- [ ] Task 6.9 — API documentation (OpenAPI auto-generated)
+- [ ] Task 6.10 — Export endpoints (JSON, CSV, Markdown)
+
 ## Deliverables
 - `docs/foundation/github-discovery_foundation_blueprint.md`
 - `findings.md`

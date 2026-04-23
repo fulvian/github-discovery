@@ -219,6 +219,32 @@ class MCPSettings(BaseSettings):
     )
 
 
+class APISettings(BaseSettings):
+    """API server settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="GHDISC_API_",
+        env_file=".env",
+    )
+
+    host: str = Field(default="127.0.0.1", description="API server host")
+    port: int = Field(default=8000, description="API server port")
+    workers: int = Field(default=1, description="Number of worker tasks per type")
+    rate_limit_per_minute: int = Field(
+        default=60,
+        description="Rate limit per IP per minute",
+    )
+    api_key: str = Field(default="", description="API key for auth (empty = no auth)")
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Allowed CORS origins",
+    )
+    job_store_path: str = Field(
+        default=".ghdisc/jobs.db",
+        description="SQLite database path for job persistence",
+    )
+
+
 class Settings(BaseSettings):
     """Root application settings composing all sub-settings."""
 
@@ -240,3 +266,4 @@ class Settings(BaseSettings):
     assessment: AssessmentSettings = Field(default_factory=AssessmentSettings)
     scoring: ScoringSettings = Field(default_factory=ScoringSettings)
     mcp: MCPSettings = Field(default_factory=MCPSettings)
+    api: APISettings = Field(default_factory=APISettings)

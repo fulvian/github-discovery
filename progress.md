@@ -286,3 +286,60 @@
 - `src/github_discovery/scoring/ranker.py` — Seeded hash tie-breaking
 - `docs/llm-wiki/wiki/` — Updated phase4, phase5, index.md, log.md
 - `progress.md` — This update
+
+## Session: 2026-04-23 (Phase 6 Implementation)
+
+### 15:30 — Phase 6 API & Worker Infrastructure Complete
+- Implemented all 10 tasks from `docs/plans/phase6-implementation-plan.md`
+- 990 tests passing (127 new), `make ci` green
+- ruff check ✅ | ruff format ✅ | mypy --strict (108 files) ✅ | pytest 990/990 ✅
+
+### Implementation Waves
+
+**Wave A — Foundation (40 tests)**:
+- `workers/types.py` — JobType, JobStatus, Job, WorkerResult
+- `workers/job_store.py` — SQLite-backed JobStore with async CRUD
+- `workers/queue.py` — AsyncTaskQueue (asyncio.Queue + JobStore)
+- `api/app.py` — FastAPI application factory with lifespan, CORS, middleware
+- `api/deps.py` — 10 dependency injection providers
+- `api/middleware.py` — Request ID and timing middleware
+- `api/errors.py` — Domain exception → HTTP status mapping
+- `api/routes/__init__.py` — Route aggregation
+
+**Wave B — Workers (32 tests)**:
+- `workers/base_worker.py` — BaseWorker ABC with status tracking
+- `workers/discovery_worker.py` — DiscoveryWorker wrapping DiscoveryOrchestrator
+- `workers/screening_worker.py` — ScreeningWorker wrapping ScreeningOrchestrator
+- `workers/assessment_worker.py` — AssessmentWorker wrapping AssessmentOrchestrator
+- `workers/worker_manager.py` — WorkerManager lifecycle + typed dispatch
+- Updated `api/app.py` — Integrated WorkerManager in lifespan
+
+**Wave C — API Routes (33 tests)**:
+- `api/routes/discovery.py` — POST /discover, GET /discover/{id}, GET /candidates
+- `api/routes/screening.py` — POST /screen, GET /screen/{id}, GET /shortlist
+- `api/routes/assessment.py` — POST /assess, GET /assess/{id}
+- `api/routes/ranking.py` — GET /rank, GET /rank/{repo}, GET /explain/{repo}
+
+**Wave D — Integration (22 tests)**:
+- `api/middleware.py` — Added RateLimiter + rate_limit_middleware
+- `api/auth.py` — API key authentication via APIKeyHeader
+- `api/routes/export.py` — POST /export (JSON, CSV, Markdown)
+- Updated `api/app.py` — Rate limiter state, export router, OpenAPI tags
+
+### Key Implementation Decisions
+- Lifespan uses deferred imports (inside function) to avoid circular imports
+- Gate1MetadataScreener and Gate2StaticScreener require `rest_client` + `settings` in constructor
+- PoolManager initialized with `:memory:` in API lifespan (stateless per instance)
+- Rate limiter uses token bucket algorithm with monotonic time
+- APIKeyHeader with `auto_error=False` for optional auth
+- Export endpoint returns inline content for small exports
+- Ranking/explain routes return stub responses (full E2E requires completed scoring pipeline)
+
+### Files Created/Modified
+- `pyproject.toml` — Added fastapi>=0.115, uvicorn[standard]>=0.30
+- `src/github_discovery/config.py` — Added APISettings class
+- `src/github_discovery/api/` — 11 new/updated modules
+- `src/github_discovery/workers/` — 9 new/updated modules
+- `tests/unit/api/` — 9 new test files (67 tests)
+- `tests/unit/workers/` — 7 new test files (60 tests)
+- `docs/llm-wiki/wiki/` — Updated phase6 plan status

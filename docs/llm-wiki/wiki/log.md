@@ -320,3 +320,33 @@
 - Updated wiki/patterns/phase5-scoring-implementation.md with verification details
 - Updated wiki/index.md with revised test counts
 - Updated progress.md with verification session details
+
+## [2026-04-23] ingest | Phase 6 API & Worker Infrastructure Implementation Plan
+- Created docs/plans/phase6-implementation-plan.md
+- Context7 verification of FastAPI 0.128+ (CORS middleware, lifespan, error handlers, dependency injection, APIKeyHeader, BackgroundTasks, StreamingResponse) and uvicorn
+- Key architecture decisions:
+  - Application factory pattern: create_app(settings) with lifespan context manager
+  - Job-based async pattern: POST → 202 + job_id → GET → poll status
+  - SQLite JobStore consistent with existing PoolManager pattern (aiosqlite)
+  - AsyncTaskQueue: asyncio.Queue + JobStore for persistence + recovery
+  - 3 worker types: DiscoveryWorker, ScreeningWorker, AssessmentWorker
+  - WorkerManager: asyncio task lifecycle with graceful cancellation
+  - Synchronous ranking endpoints (no job queue needed)
+  - Rate limiting: in-memory token bucket (per IP)
+  - Auth: APIKeyHeader (optional, disabled by default for local dev)
+  - Export: JSON/CSV/Markdown via stdlib (no new deps)
+- New dependencies: fastapi>=0.115, uvicorn[standard]>=0.30
+- New config: APISettings (GHDISC_API_* prefix) — host, port, workers, rate_limit, api_key, cors_origins, job_store_path
+- Covers 10 tasks: app setup, 4 route groups, 3 worker types, queue, rate limit/auth, docs, export
+- ~110 new tests planned across 15 test files
+- 4 implementation waves: A (Foundation), B (Workers), C (Routes), D (Integration)
+- Updated wiki/index.md with Phase 6 plan reference
+
+## [2026-04-23] ingest | Phase 6 API & Worker Implementation COMPLETE
+- Implemented all 10 tasks from phase6-implementation-plan.md in 4 waves
+- Wave A: Foundation — workers/types, job_store, queue, api/app, deps, middleware, errors (40 tests)
+- Wave B: Workers — base_worker, discovery/screening/assessment workers, worker_manager (32 tests)
+- Wave C: Routes — discovery, screening, assessment, ranking route modules (33 tests)
+- Wave D: Integration — rate limiting, API key auth, export routes, OpenAPI tags (22 tests)
+- 127 new tests (990 total), make ci green
+- Updated wiki/patterns/phase6-api-worker-plan.md status to COMPLETE
