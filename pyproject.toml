@@ -30,6 +30,9 @@ dependencies = [
     "typer>=0.12",
     "mcp>=1.0",
     "aiosqlite>=0.20",
+    "repomix>=0.1.0",
+    "openai>=1.30",
+    "instructor>=1.4",
 ]
 
 [project.optional-dependencies]

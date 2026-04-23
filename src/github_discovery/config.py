@@ -60,7 +60,11 @@ class ScreeningSettings(BaseSettings):
 
 
 class AssessmentSettings(BaseSettings):
-    """Deep assessment (Gate 3) settings."""
+    """Deep assessment (Gate 3) settings.
+
+    Uses NanoGPT as the LLM provider with OpenAI-compatible API.
+    SDK stack: openai SDK (custom base_url) + instructor for structured output.
+    """
 
     model_config = SettingsConfigDict(
         env_prefix="GHDISC_ASSESSMENT_",
@@ -75,17 +79,52 @@ class AssessmentSettings(BaseSettings):
         default=500000,
         description="Max LLM tokens per day budget",
     )
-    llm_provider: str = Field(
-        default="openai",
-        description="LLM provider (openai, anthropic, local)",
+
+    # NanoGPT provider settings
+    nanogpt_api_key: str = Field(
+        default="",
+        description="NanoGPT API key for LLM assessment",
+    )
+    nanogpt_base_url: str = Field(
+        default="https://nano-gpt.com/api/subscription/v1",
+        description="NanoGPT API base URL (OpenAI-compatible)",
     )
     llm_model: str = Field(
         default="gpt-4o",
-        description="LLM model identifier",
+        description="LLM model identifier for NanoGPT",
     )
+    llm_temperature: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=2.0,
+        description="LLM temperature for assessment (low = consistent)",
+    )
+    llm_max_retries: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Max retries for LLM API calls via instructor",
+    )
+
+    # Repomix packing settings
+    repomix_max_tokens: int = Field(
+        default=40000,
+        description="Max tokens for repomix packed output",
+    )
+    repomix_compression: bool = Field(
+        default=True,
+        description="Enable repomix interface-mode compression",
+    )
+
     cache_ttl_hours: int = Field(
         default=24,
         description="Cache TTL for assessment results (hours)",
+    )
+    gate3_threshold: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description="Minimum Gate 3 score to pass",
     )
 
 

@@ -238,3 +238,33 @@
 - 500 total tests pass, `make ci` green: ruff + mypy --strict + pytest
 - Updated wiki/patterns/phase3-screening-implementation.md with verification findings
 - Updated wiki/index.md with revised Phase 3 entry
+
+## [2026-04-23] ingest | Phase 4 Deep Assessment Implementation Complete
+- All 13 implementation tasks completed and verified
+- 700 tests passing (200 new assessment tests + 500 pre-existing), `make ci` green
+- ruff check ✅ | ruff format ✅ | mypy --strict ✅ | pytest 700/700 ✅
+- 77 source files pass mypy --strict, all pass ruff check/format
+- Source modules created (17 files):
+  - types.py: RepoContent, HeuristicScores, AssessmentContext, LLMDimensionOutput, LLMBatchOutput
+  - repomix_adapter.py: Repo packing via repomix RepoProcessor (async via asyncio.to_thread)
+  - llm_provider.py: NanoGPT provider with instructor.from_openai(AsyncOpenAI(...))
+  - budget_controller.py: Per-repo + per-day token budget enforcement
+  - heuristics.py: 7 detection methods + additive structure scoring
+  - result_parser.py: Batch/per-dimension parsing + heuristic fallback
+  - orchestrator.py: Full Gate 3 pipeline + hard gate enforcement + caching
+  - prompts/: 8 dimension prompt templates + DIMENSION_PROMPTS registry
+  - __init__.py: 11 public API exports
+- Test files created (9 files):
+  - conftest.py (8 fixtures), test_types.py (35), test_heuristics.py (38), test_budget_controller.py (25)
+  - test_result_parser.py (34), test_repomix_adapter.py (15), test_llm_provider.py (18), test_orchestrator.py (24)
+- Bugs fixed during verification:
+  - repomix PyPI package name: `repomix` (not `python-repomix`)
+  - RepoProcessor API: config in constructor, not process()
+  - BudgetController.record_usage: added full_name parameter (was using model_used as repo key)
+- Context7 verification before implementation:
+  - repomix: RepoProcessor(repo_url, config=config), process(write_output=False), RepomixConfig compression
+  - instructor: instructor.from_openai(AsyncOpenAI(...)), response_model=PydanticModel, max_retries
+  - openai: AsyncOpenAI(base_url=..., api_key=...), structured output
+  - pydantic: BaseModel, computed_field, model_json_schema(), field_validator
+- Updated wiki/patterns/phase4-assessment-implementation.md with complete implementation record
+- Updated wiki/index.md with completion status
