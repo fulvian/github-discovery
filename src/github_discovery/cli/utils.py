@@ -58,6 +58,17 @@ def comma_separated_to_list(value: str) -> list[str]:
     return [s.strip() for s in value.split(",") if s.strip()]
 
 
+def get_session_db_path(settings: Any) -> str:
+    """Resolve session database path from settings.
+
+    Centralizes the db_path resolution that was duplicated across
+    session.py (4 times) and export.py (1 time).
+    """
+    if hasattr(settings, "mcp") and hasattr(settings.mcp, "session_store_path"):
+        return str(settings.mcp.session_store_path)
+    return ".ghdisc/sessions.db"
+
+
 def exit_with_error(message: str, code: int = 1) -> None:
     """Print error to stderr and exit with code."""
     console = get_console()

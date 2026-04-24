@@ -77,13 +77,11 @@ def register(app: typer.Typer) -> None:
 
 async def _create_session(settings: object, name: str) -> None:
     """Create a new session."""
-    from github_discovery.cli.utils import get_console
+    from github_discovery.cli.utils import get_console, get_session_db_path
     from github_discovery.mcp.session import SessionManager
 
-    db_path = (
-        settings.mcp.session_store_path if hasattr(settings, "mcp") else ".ghdisc/sessions.db"
-    )
-    mgr = SessionManager(str(db_path))
+    db_path = get_session_db_path(settings)
+    mgr = SessionManager(db_path)
     await mgr.initialize()
     try:
         session = await mgr.create(name=name)
@@ -98,14 +96,12 @@ async def _create_session(settings: object, name: str) -> None:
 async def _list_sessions(settings: object, status: str | None, limit: int) -> None:
     """List sessions."""
     from github_discovery.cli.formatters import format_output
-    from github_discovery.cli.utils import get_console, get_output_console
+    from github_discovery.cli.utils import get_console, get_output_console, get_session_db_path
     from github_discovery.mcp.session import SessionManager
     from github_discovery.models.session import SessionStatus
 
-    db_path = (
-        settings.mcp.session_store_path if hasattr(settings, "mcp") else ".ghdisc/sessions.db"
-    )
-    mgr = SessionManager(str(db_path))
+    db_path = get_session_db_path(settings)
+    mgr = SessionManager(db_path)
     await mgr.initialize()
     try:
         status_filter = SessionStatus(status) if status else None
@@ -126,14 +122,12 @@ async def _list_sessions(settings: object, status: str | None, limit: int) -> No
 
 async def _resume_session(settings: object, session_id: str) -> None:
     """Resume a session and suggest next steps."""
-    from github_discovery.cli.utils import exit_with_error, get_console
+    from github_discovery.cli.utils import exit_with_error, get_console, get_session_db_path
     from github_discovery.mcp.session import SessionManager
     from github_discovery.models.session import SessionStatus
 
-    db_path = (
-        settings.mcp.session_store_path if hasattr(settings, "mcp") else ".ghdisc/sessions.db"
-    )
-    mgr = SessionManager(str(db_path))
+    db_path = get_session_db_path(settings)
+    mgr = SessionManager(db_path)
     await mgr.initialize()
     try:
         session = await mgr.get(session_id)
@@ -170,13 +164,11 @@ async def _resume_session(settings: object, session_id: str) -> None:
 async def _show_session(settings: object, session_id: str, fmt: str) -> None:
     """Show detailed session state."""
     from github_discovery.cli.formatters import format_output
-    from github_discovery.cli.utils import exit_with_error, get_output_console
+    from github_discovery.cli.utils import exit_with_error, get_output_console, get_session_db_path
     from github_discovery.mcp.session import SessionManager
 
-    db_path = (
-        settings.mcp.session_store_path if hasattr(settings, "mcp") else ".ghdisc/sessions.db"
-    )
-    mgr = SessionManager(str(db_path))
+    db_path = get_session_db_path(settings)
+    mgr = SessionManager(db_path)
     await mgr.initialize()
     try:
         session = await mgr.get(session_id)

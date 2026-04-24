@@ -479,3 +479,57 @@ All 10 mandatory criteria verified:
 - `pyproject.toml` — Added feasibility marker
 - `docs/llm-wiki/wiki/` — Updated phase9 plan, index, log
 - `.workflow/state.md` — Phase 9 completion
+
+## Session: 2026-04-24 (Phase 8+9 Deep Verification & Bug Fixes)
+
+### 12:00 — Post-Implementation Verification
+
+Deep analysis of Phase 8 (CLI) and Phase 9 (Feasibility) implementation quality against plans. Baseline: 1316 tests, ruff clean, mypy --strict clean.
+
+### Bugs Found and Fixed (7)
+
+1. **HIGH — `progress_display.py` streaming stubs**: All 3 display functions (`display_discovery_progress`, `display_screening_progress`, `display_assessment_progress`) were stub implementations with "Will be implemented in Wave B/C" comments. Fully implemented with Rich Progress + Panel + Table for real-time feedback.
+
+2. **HIGH — `rank.py` silent exception swallowing**: `except Exception: all_features = []` silently hid all FeatureStore errors. Changed to `exit_with_error()` with contextual message telling user to run the full pipeline first.
+
+3. **MEDIUM — `baseline.py` Wilcoxon tie handling bug**: When computing the Wilcoxon signed-rank test, zero differences (tied rankings) were not excluded before ranking. This inflated rank values for non-zero entries. Standard Wilcoxon requires excluding ties before the ranking step. Fixed: `differences = [d for d in differences if d != 0.0]` before the ranking loop.
+
+4. **MEDIUM — `sprint0.py` LLM budget enforcement was post-hoc**: Budget check happened after each assessment completed, allowing budget overshoot. Added pre-truncation: estimates ~5000 tokens/candidate and truncates candidate list before assessment. Post-hoc check retained as backup.
+
+5. **LOW — `session.py` + `export.py` DRY violation**: 5 identical `db_path` resolution blocks across session.py (4) and export.py (1). Extracted `get_session_db_path()` to `cli/utils.py` and replaced all occurrences.
+
+6. **LOW — `progress_display.py` lint issues**: Removed unused imports (`get_output_console`), fixed import ordering (ruff I001), fixed line-too-long (E501), removed 3 unnecessary `# type: ignore[arg-type]` comments (mypy unused-ignore).
+
+7. **LOW — `rank.py` missing `store.initialize()`**: FeatureStore async initialization was missing before calling `get_by_domain()`.
+
+### Known Issues (documented, not fixed — require architectural decisions)
+
+- **Task 9.5 (Blind Human Evaluation) unimplemented**: `HumanEvalSample` dataclass and `generate_human_eval_dataset()` not created
+- **3 fixture files from plan missing**: `baseline_rankings.json`, `human_eval_template.json`, `calibrated_weights.json`
+- **Sprint0 tests mock all pipeline internals**: violates "mock only externals" principle
+- **FullMetricsReport uses flat float fields** instead of nested `PrecisionAtKResult` objects (plan deviation)
+- **27 CLI tests are shallow**: only verify `mock_run_async.called` without testing business logic
+- **`tests/unit/test_mcp/` is a leftover stub** (2 trivial tests) overlapping with `tests/unit/mcp/` (135 real tests)
+- **Unused test markers**: `agentic` and `feasibility` defined but never applied
+
+### Verification After Fixes
+
+```
+ruff check src/     → All checks passed!
+mypy src/ --strict  → Success: no issues found in 135 source files
+pytest              → 1316 passed in 39.95s
+```
+
+### Files Modified
+
+- `src/github_discovery/cli/progress_display.py` — Fully rewritten (3 stubs → real implementations)
+- `src/github_discovery/cli/rank.py` — Fixed silent exception swallowing + missing initialize()
+- `src/github_discovery/cli/utils.py` — Added `get_session_db_path()` helper
+- `src/github_discovery/cli/session.py` — Replaced 4 duplicated db_path blocks
+- `src/github_discovery/cli/export.py` — Replaced 1 duplicated db_path block
+- `src/github_discovery/feasibility/baseline.py` — Fixed Wilcoxon tie handling
+- `src/github_discovery/feasibility/sprint0.py` — Added pre-truncation budget enforcement
+- `docs/llm-wiki/wiki/log.md` — Appended verification session entry
+- `docs/llm-wiki/wiki/patterns/phase8-cli-plan.md` — Updated with verification findings
+- `docs/llm-wiki/wiki/patterns/phase9-feasibility-plan.md` — Updated with verification findings
+- `progress.md` — This update

@@ -15,7 +15,7 @@ Phase 9 is the **go/no-go gate** of the project. It validates two things:
 1. **Feasibility**: GitHub Discovery finds repos technically better than star-based baseline (Precision@K > baseline)
 2. **Integration**: The entire system works end-to-end (CLI → API → Workers → Pipeline → Export) and integrates with real MCP clients (Kilocode CLI, OpenCode)
 
-**Status**: COMPLETE + VERIFIED — All 4 waves implemented, 113 new tests, `make ci` green (1314 tests passing)
+**Status**: COMPLETE + VERIFIED — All 4 waves implemented, 113 new tests, `make ci` green (1316 tests passing). Post-implementation verification (2026-04-24): 2 bugs fixed, documented gaps.
 
 ### Implementation Results
 
@@ -26,7 +26,25 @@ Phase 9 is the **go/no-go gate** of the project. It validates two things:
 | C | 9.2, 9.3, 9.6, 9.7 (feasibility validation tests) | 40 (in Wave A) | ✅ Complete |
 | D | 9.9, 9.10, 9.11 (agentic MCP integration) | 27 | ✅ Complete |
 
-**Total**: 113 new tests (1203 → 1316 collected, 1314 passing, 2 pre-existing flaky network tests)
+**Total**: 113 new tests (1203 → 1316 collected, all 1316 passing)
+
+### Post-Implementation Verification (2026-04-24)
+
+#### Bugs Fixed
+
+1. **MEDIUM — baseline.py Wilcoxon signed-rank tie handling**: When `differences` contained zeros (tied rankings), the rank enumeration assigned inflated ranks to non-zero entries. Standard Wilcoxon requires excluding ties before ranking. Fixed: `differences = [d for d in differences if d != 0.0]` before the ranking loop.
+
+2. **MEDIUM — sprint0.py LLM budget enforcement was post-hoc**: Budget check happened after each assessment completed, allowing overshoot. Added pre-truncation: estimates ~5000 tokens/candidate and truncates candidate list before assessment. Post-hoc check retained as backup.
+
+#### Known Issues (documented, not fixed)
+
+- **Task 9.5 (Blind Human Evaluation) unimplemented**: `HumanEvalSample` dataclass and `generate_human_eval_dataset()` function not created. Plan acknowledged this is "primarily procedural" but the scaffolding code is absent.
+- **3 fixture files missing**: `baseline_rankings.json`, `human_eval_template.json`, `calibrated_weights.json` from plan's directory structure. Tests compute data dynamically instead.
+- **Sprint0 tests mock all pipeline internals**: `_run_screening`, `_run_assessment`, `_run_scoring`, `_run_ranking` are all patched — violating "mock only externals" principle. Would need `mock_github_api` fixture (never implemented).
+- **FullMetricsReport deviates from plan**: Uses flat `float` fields instead of nested `PrecisionAtKResult` objects. Ground truth is binary (`set[str]`) instead of graded (`dict[str, float]`), limiting NDCG to binary relevance.
+- **27 CLI tests shallow**: Only verify `mock_run_async.called` without testing actual business logic or output formatting.
+- **Agentic progressive deepening tests**: Only verify error handling (`success=False` for missing pools), not actual data flow from discovery through screening to ranking.
+- **Unused markers**: `agentic` and `feasibility` defined in pyproject.toml but never applied to tests.
 
 ### Modules Created
 

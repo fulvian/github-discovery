@@ -354,6 +354,22 @@ async def _run_assessment(
     )
 
     total_tokens = 0
+    # Pre-truncate candidate list to enforce hard budget constraint.
+    # Estimate ~5000 tokens per candidate (conservative average for LLM assessment).
+    _TOKENS_PER_CANDIDATE_ESTIMATE = 5_000
+    max_assessable = min(
+        len(candidates),
+        config.llm_budget_tokens // _TOKENS_PER_CANDIDATE_ESTIMATE,
+    )
+    if max_assessable < len(candidates):
+        logger.warning(
+            "sprint0_budget_limited_candidates",
+            original_count=len(candidates),
+            assessable_count=max_assessable,
+            budget=config.llm_budget_tokens,
+        )
+        context.candidates = candidates[:max_assessable]
+
     results_list = await orchestrator.assess(context)
     results_map: dict[str, DeepAssessmentResult] = {}
 

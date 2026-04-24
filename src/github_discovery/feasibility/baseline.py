@@ -470,6 +470,8 @@ def _approximate_wilcoxon_p(
         if star_rank is not None:
             differences.append(float(repo.rank - star_rank))
 
+    # Standard Wilcoxon: exclude ties (zero differences) before ranking
+    differences = [d for d in differences if d != 0.0]
     n = len(differences)
     if n < _MIN_WILCOXON_SAMPLES:
         return 1.0

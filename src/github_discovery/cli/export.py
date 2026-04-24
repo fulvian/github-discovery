@@ -87,14 +87,11 @@ async def _export(
         # Collect data
         data: dict[str, object] | list[object] = {}
         if session_id:
+            from github_discovery.cli.utils import get_session_db_path
             from github_discovery.mcp.session import SessionManager
 
-            db_path = (
-                settings.mcp.session_store_path
-                if hasattr(settings, "mcp")
-                else ".ghdisc/sessions.db"
-            )
-            mgr = SessionManager(str(db_path))
+            db_path = get_session_db_path(settings)
+            mgr = SessionManager(db_path)
             await mgr.initialize()
             try:
                 session = await mgr.get(session_id)

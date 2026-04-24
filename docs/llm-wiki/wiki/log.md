@@ -467,3 +467,27 @@
 - 113 new tests total, 1314/1316 passing (ruff + mypy --strict + pytest green)
 - Updated wiki/patterns/phase9-feasibility-plan.md with implementation results
 - Updated wiki/index.md with Phase 9 completion status
+
+## [2026-04-24] ingest | Phase 8+9 Deep Verification and Bug Fixes
+- Comprehensive analysis of Phase 8 (CLI) and Phase 9 (Feasibility/Integration) against implementation plans
+- Three parallel explore agents analyzed: CLI implementation, feasibility module, test suite quality
+- Baseline: 1316 tests passing, ruff clean, mypy --strict clean
+- Issues found and fixed:
+  - HIGH: progress_display.py had 3 stub functions — fully implemented with Rich Progress + Panel + Table
+  - HIGH: screen.py constructed screeners with rest_client=None (potential runtime crash in metadata checks)
+  - HIGH: rank.py silently swallowed FeatureStore exceptions with bare `except Exception: all_features = []`
+  - MEDIUM: baseline.py Wilcoxon signed-rank had tie-handling bug (zero differences not excluded before ranking)
+  - MEDIUM: sprint0.py LLM budget enforcement was post-hoc (after assessment), now has pre-truncation with estimate
+  - LOW: session.py + export.py had 5 duplicated db_path resolution blocks — extracted to utils.get_session_db_path()
+  - LOW: progress_display.py had unused imports and line-too-long — fixed
+  - LOW: 3 unused `# type: ignore[arg-type]` comments removed (mypy unused-ignore)
+- Issues documented but NOT fixed (require architectural decisions or more extensive changes):
+  - Task 9.5 (Blind Human Evaluation) entirely unimplemented — HumanEvalSample dataclass and generate_human_eval_dataset() missing
+  - 3 fixture files from plan missing: baseline_rankings.json, human_eval_template.json, calibrated_weights.json
+  - Sprint0 tests mock all internal pipeline stages (violates "mock only externals" principle)
+  - FullMetricsReport uses flat float fields instead of nested PrecisionAtKResult objects (plan deviation)
+  - 27 CLI tests only verify mock_run_async.called without testing actual business logic
+  - tests/unit/test_mcp/ directory is a leftover stub overlapping with tests/unit/mcp/
+  - Unused test markers: 'agentic' and 'feasibility' defined but never applied
+- After fixes: 1316 tests passing, ruff ✅, mypy --strict ✅
+- Updated wiki/index.md with verification notes

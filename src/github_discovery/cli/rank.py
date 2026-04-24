@@ -105,9 +105,14 @@ async def _rank_repos(
     # Load scored repos from FeatureStore
     store = FeatureStore()
     try:
+        await store.initialize()
         all_features = await store.get_by_domain(domain_type)
-    except Exception:
-        all_features = []
+    except Exception as e:
+        exit_with_error(
+            f"Failed to load scored repos for domain '{domain}': {e}. "
+            "Run discover + screen + deep-eval first.",
+        )
+        return  # unreachable: exit_with_error raises SystemExit
 
     if not all_features:
         exit_with_error(

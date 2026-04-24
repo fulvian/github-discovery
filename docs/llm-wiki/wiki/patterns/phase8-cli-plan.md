@@ -13,7 +13,7 @@ Confidence: high
 
 Phase 8 implements the CLI interface for batch processing, CI/CD automation, and interactive agentic use. The CLI consumes the same core services as MCP (Phase 7) and API (Phase 6).
 
-**Status**: COMPLETE — all 4 waves implemented and verified. 82 CLI tests, 1199 total tests passing.
+**Status**: COMPLETE + VERIFIED — all 4 waves implemented and verified. 82 CLI tests, 1199 total tests passing. Post-implementation verification (2026-04-24): 7 bugs fixed, all tests green (1316 total).
 
 ## Key Architecture Decisions
 
@@ -139,6 +139,25 @@ cli/
 - `AssessmentOrchestrator` uses `quick_assess()` (not `assess_single()`)
 - Test patches target `github_discovery.cli.utils.*` (where functions are defined)
 - Per-file-ignores for `cli/*.py`: PLC0415 (deferred imports), PLR2004 (display width constants)
+
+## Post-Implementation Verification (2026-04-24)
+
+### Bugs Fixed
+
+1. **HIGH — progress_display.py streaming stubs**: All 3 display functions (`display_discovery_progress`, `display_screening_progress`, `display_assessment_progress`) were stub implementations with placeholder text. Fully implemented with Rich Progress + Panel + Table for real-time feedback.
+
+2. **HIGH — rank.py silent exception swallowing**: `except Exception: all_features = []` hid all FeatureStore errors. Changed to `exit_with_error()` with contextual message telling user to run pipeline first.
+
+3. **LOW — session.py + export.py DRY violation**: 5 identical `db_path` resolution blocks. Extracted `get_session_db_path()` to `cli/utils.py`.
+
+4. **LOW — progress_display.py lint issues**: Removed unused imports (`get_output_console`), fixed import ordering (ruff I001), fixed line-too-long (E501), removed 3 unnecessary `# type: ignore[arg-type]` comments (mypy unused-ignore).
+
+### Known Issues (documented, not fixed)
+
+- 27 CLI tests use `mock_run_async` pattern that only verifies delegation, not business logic
+- `--stream` flag in `screen` and `deep_eval` commands not wired to streaming display (progress_display.py now has implementations, but commands don't call them)
+- Old `cli.py` kept as backward-compat redirect — could add deprecation warning
+- `tests/unit/test_mcp/` directory is a leftover stub (2 trivial tests) overlapping with `tests/unit/mcp/` (135 real tests)
 
 ## See Also
 - [Agent Workflow Patterns](agent-workflows.md)
