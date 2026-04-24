@@ -7,7 +7,7 @@ Enables running the CLI via:
 
 from __future__ import annotations
 
-from github_discovery.cli import app
+from github_discovery.cli.app import app
 
 if __name__ == "__main__":
     app()

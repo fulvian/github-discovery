@@ -397,3 +397,37 @@
   - Test infrastructure: created make_app_ctx fixture for full AppContext mocking
   - Fixed 28 test files to use new AppContext with all 9 services
 - 1118 tests passing, 0 lint/type errors, CI clean
+
+## [2026-04-24] ingest | Phase 8 CLI Implementation Plan
+- Created docs/plans/phase8-implementation-plan.md
+- Context7 verification of typer 0.12+ (callback, rich_markup_mode, Annotated types, context_settings, subcommands, rich_help_panel) and rich 13+ (Console, Table, Progress, Live, Markdown, SpinnerColumn, BarColumn, TimeElapsedColumn)
+- Key architecture decisions:
+  - CLI refactor from monolithic cli.py to cli/ package with modular command registration
+  - Rich for terminal output: Table for data display, Progress+Live for streaming, Panel for grouped output
+  - Global options via @app.callback: --verbose, --config-file, --output-format, --log-level, --no-color
+  - Async commands via asyncio.run() wrapper (typer has no native async support)
+  - 4 output formats: JSON, Table (Rich), Markdown, YAML-like (via json.dumps indent)
+  - Session commands: create, list, resume, show — for agentic interactive workflows
+  - Tasks 8.8 (mcp serve) and 8.10 (mcp init-config) already implemented in Phase 7 — refactored to cli/mcp_serve.py and cli/mcp_config.py
+  - New dependency: rich>=13.0
+  - ~84 new tests planned across 11 test files
+  - 4 implementation waves: A (Foundation), B (Pipeline Commands), C (Advanced Commands), D (MCP Refactor)
+- Updated wiki/index.md with Phase 8 plan reference
+
+## [2026-04-24] ingest | Phase 8 CLI Implementation Complete
+- Updated wiki/patterns/phase8-cli-plan.md: status changed from PLAN to COMPLETE
+- All 4 waves (A-D) implemented and verified:
+  - Wave A: cli/ package, app.py (Typer factory + callback), utils.py, formatters.py (7 table builders + 4 formats), progress_display.py, mcp_serve.py, mcp_config.py — 41 tests
+  - Wave B: discover.py, screen.py, rank.py — 17 tests
+  - Wave C: deep_eval.py, export.py, session.py — 24 tests
+  - Wave D: mcp serve/init-config refactored (done in Wave A)
+- 82 CLI tests passing, 1199 total (ruff + mypy --strict + pytest)
+- Context7 verification: typer callback/rich_markup_mode/Annotated, rich Console/Table/Progress/Panel
+- Key patterns:
+  - `register(app: typer.Typer)` for modular command registration
+  - `run_async()` wrapper (asyncio.run) for typer async commands
+  - `Console(file=StringIO())` for test output capture
+  - `DeepAssessmentResult.overall_quality` (not `overall_score`), `gate3_pass` (not `passed`)
+  - `AssessmentOrchestrator.quick_assess()` (not `assess_single()`)
+  - Per-file-ignores: PLC0415, PLR2004 for cli/*.py
+- Updated wiki/index.md with Phase 8 completion status

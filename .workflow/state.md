@@ -1,7 +1,7 @@
 # Project State
 
-## Current Phase: Phase 7 — MCP-Native Integration Layer (COMPLETE)
-## Started: 2026-04-22T11:06:00+02:00
+## Current Phase: Phase 8 — CLI & Agent-Friendly Interface (COMPLETE)
+## Started: 2026-04-24T00:20:00+02:00
 ## PRD: docs/foundation/github-discovery_foundation_blueprint.md
 ## Roadmap: docs/roadmaps/github-discovery_foundation_roadmap.md
 ## Phase 0 Plan: docs/plans/phase0-implementation-plan.md
@@ -12,8 +12,9 @@
 ## Phase 5 Plan: docs/plans/phase5-implementation-plan.md
 ## Phase 6 Plan: docs/plans/phase6-implementation-plan.md
 ## Phase 7 Plan: docs/plans/phase7-implementation-plan.md
-## Implementation: Phase 0+1+2+3+4+5+6+7 complete (1118 tests)
-## Tests: 1118 passing, 3 skipped (ruff + mypy --strict + pytest)
+## Phase 8 Plan: docs/plans/phase8-implementation-plan.md
+## Implementation: Phase 0+1+2+3+4+5+6+7+8 complete (1199 tests passing)
+## Tests: 1199 passing, 3 skipped, 1 pre-existing flaky test (ruff + mypy --strict + pytest)
 ## Deployment: Pending
 
 ## Agent History
@@ -48,6 +49,11 @@
 | 2026-04-23T17:00+02:00 | General Manager | Phase 6 verification — make ci green (990 tests) | Done |
 | 2026-04-23T19:30+02:00 | Coder | Phase 7 Waves A-D — FastMCP server, 16 tools, 4 resources, 5 prompts, session, config | Done |
 | 2026-04-23T20:00+02:00 | General Manager | Phase 7 Wave E — CLI integration, __main__.py, integration tests, wiki update | Done |
+| 2026-04-24T00:20+02:00 | General Manager | Phase 8 Wave A — Context7 verification, wiki-first reconstruction | Done |
+| 2026-04-24T00:30+02:00 | Coder | Phase 8 Wave A — cli/ package, app.py, utils.py, formatters.py, progress_display.py — 41 tests | Done |
+| 2026-04-24T01:00+02:00 | Coder | Phase 8 Wave B — discover, screen, rank commands — 17 tests | Done |
+| 2026-04-24T01:30+02:00 | Coder | Phase 8 Wave C — deep-eval, export, session commands — 24 tests | Done |
+| 2026-04-24T02:00+02:00 | General Manager | Phase 8 verification — make ci green (1199 tests), wiki update, state update | Done |
 
 ## Skills Invoked
 | Phase | Skill | Outcome |
@@ -58,6 +64,8 @@
 | Phase 6 | planning-with-files | Phase 6 plan creation tracked |
 
 ## Notes
-- Phase 0 + Phase 1 + Phase 2 + Phase 3 + Phase 4 + Phase 5 + Phase 6 + Phase 7 complete and verified
-- `make ci` green: ruff + mypy --strict + 1114 tests (3 skipped agentic stubs)
-- Phase 7 complete: FastMCP server (16 tools, 4 resources, 5 prompts), CLI mcp serve/init-config, SessionManager, progress notifications, GitHub MCP composition
+- Phase 0 + Phase 1 + Phase 2 + Phase 3 + Phase 4 + Phase 5 + Phase 6 + Phase 7 + Phase 8 complete and verified
+- `make ci` green: ruff + mypy --strict + 1199 tests (3 skipped agentic stubs, 1 pre-existing flaky test)
+- Phase 8 complete: CLI with 6 pipeline commands (discover/screen/deep-eval/rank/export/session), Rich output, session management, MCP refactor, 82 CLI tests
+- New dependency: rich>=13.0
+- CLI entry points: `python -m github_discovery`, `ghdisc` (console script)
