@@ -112,6 +112,13 @@ class CuratedChannel:
             )
             return self._empty_result(elapsed=time.monotonic() - start_time)
 
+        if not isinstance(readme_data, dict):
+            logger.warning(
+                "curated_channel_readme_unexpected_type",
+                url=awesome_repo_url,
+                type=type(readme_data).__name__,
+            )
+            return self._empty_result(elapsed=time.monotonic() - start_time)
         markdown_content = self._decode_readme(readme_data)
         if not markdown_content:
             logger.warning(

@@ -213,12 +213,17 @@ class GitHubRestClient:
         *,
         params: dict[str, str | int] | None = None,
         etag: str | None = None,
-    ) -> dict[str, Any] | None:
-        """GET request returning parsed JSON. Returns None for 304."""
+    ) -> dict[str, Any] | list[Any] | None:
+        """GET request returning parsed JSON. Returns None for 304.
+
+        Returns the raw parsed JSON (dict or list).
+        GitHub API endpoints return both dicts (single resource)
+        and lists (collections) depending on the endpoint.
+        """
         response = await self.get(url, params=params, etag=etag)
         if response.status_code == _HTTP_NOT_MODIFIED:
             return None
-        return dict(response.json())
+        return response.json()  # type: ignore[no-any-return]
 
     async def get_all_pages(
         self,

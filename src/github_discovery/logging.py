@@ -68,7 +68,7 @@ def configure_logging(log_level: str = "INFO", debug: bool = False) -> None:
         ],
     )
 
-    handler = logging.StreamHandler()
+    handler = logging.StreamHandler(stream=sys.stderr)
     handler.setFormatter(formatter)
     root_logger = logging.getLogger()
     root_logger.handlers.clear()

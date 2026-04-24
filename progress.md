@@ -533,3 +533,54 @@ pytest              → 1316 passed in 39.95s
 - `docs/llm-wiki/wiki/patterns/phase8-cli-plan.md` — Updated with verification findings
 - `docs/llm-wiki/wiki/patterns/phase9-feasibility-plan.md` — Updated with verification findings
 - `progress.md` — This update
+
+## Session: 2026-04-24 (Wave 0 — Real API Smoke Tests)
+
+### 15:30 — Smoke Tests with Real GitHub API
+
+Executed Wave 0 smoke tests against real GitHub API using live token. All core interfaces verified.
+
+### Bugs Found and Fixed (3)
+
+1. **HIGH — `ruff ANN401` in `github_client.py:get_json()`**: Return type was `Any | None`. Changed to `dict[str, Any] | list[Any] | None` with proper downstream isinstance checks in `dependency_channel.py` and `curated_channel.py`.
+
+2. **HIGH — `GateLevel("METADATA")` crash in CLI screen**: `gate_map` used enum names ("METADATA", "STATIC_SECURITY", "BOTH") but `GateLevel` is a `StrEnum` with values ("1", "2", "3"). Fixed to use string values. "both" now maps to "2" (runs Gate 1 then Gate 2).
+
+3. **HIGH — `rest_client=None` in CLI screen**: `Gate1MetadataScreener` and `Gate2StaticScreener` were initialized with `rest_client=None`, making it impossible to fetch repo metadata from GitHub API. All repos scored 0.014 (minimum). Fixed to create real `GitHubRestClient(real_settings.github)`.
+
+### Smoke Test Results
+
+| Test | Interface | Result | Details |
+|------|-----------|--------|---------|
+| CLI discover | CLI → GitHub API | ✅ PASS | 30 repos in 1.8s, 3 channels (search, registry, awesome_list) |
+| CLI discover (search only) | CLI → GitHub API | ✅ PASS | 10 repos in 0.9s |
+| CLI screen --gate 1 | CLI → GitHub API | ✅ PASS | 5/10 pass Gate 1 with scores 0.48-0.53 |
+| CLI screen --gate both | CLI → GitHub API | ✅ PASS | 4/10 pass both gates, eligible for Gate 3 |
+| CLI rank | CLI | ⚠️ PARTIAL | Needs FeatureStore populated by screen — architectural gap |
+| MCP serve --transport stdio | MCP | ✅ PASS | 16 tools configured, session manager initialized |
+| MCP init-config --target kilo | MCP | ✅ PASS | Valid Kilo config generated |
+| MCP init-config --target opencode | MCP | ✅ PASS | Valid OpenCode config generated |
+| API server /health | API | ✅ PASS | `{"status":"ok"}` + 3 workers started |
+| API server /docs | API | ✅ PASS | Swagger UI accessible |
+
+### Known Gaps (documented, not fixed)
+
+1. **CLI rank requires FeatureStore**: `screen` command doesn't persist results to FeatureStore, so `rank` finds nothing. Need integration between CLI screen → FeatureStore → CLI rank.
+2. **Awesome-list channel noise**: Query "static analysis python" returns mostly awesome-* list repos, not actual software. Need better query handling or channel weighting.
+3. **Screening log too verbose**: All debug/warning logs go to console in CLI mode. Need configurable log levels per interface.
+
+### CI Status After Fixes
+
+```
+ruff check src/     → All checks passed!
+mypy src/ --strict  → Success: no issues found in 135 source files
+pytest              → 1316 passed in 32.59s
+```
+
+### Files Modified
+
+- `src/github_discovery/discovery/github_client.py` — Return type fix (ANN401)
+- `src/github_discovery/discovery/dependency_channel.py` — isinstance guard for get_json result
+- `src/github_discovery/discovery/curated_channel.py` — isinstance guard for get_json result
+- `src/github_discovery/cli/screen.py` — Fixed GateLevel mapping + real REST client
+- `progress.md` — This update

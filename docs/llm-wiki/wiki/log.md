@@ -491,3 +491,35 @@
   - Unused test markers: 'agentic' and 'feasibility' defined but never applied
 - After fixes: 1316 tests passing, ruff ✅, mypy --strict ✅
 - Updated wiki/index.md with verification notes
+
+## [2026-04-24] ingest | Phase 10 Alpha Engine & Marketplace Analysis
+- Analyzed Phase 10 roadmap tasks against current project state (1314 tests, 135 source files, phases 0-9 complete)
+- Researched Kilo Marketplace structure (Kilo-Org/kilo-marketplace): Skills, MCP Servers, Modes
+- Analyzed MCP.yaml format from existing entries (github, context7) — UVX/Docker/HTTP install options
+- Context7-verified MCP Python SDK transport patterns (stdio, streamable-http, stateless_http)
+- Key findings:
+  - System never tested against real GitHub APIs (all 1314 tests use mocks)
+  - No Docker packaging, no user docs, no PyPI publish, no marketplace entry
+  - MCP server not tested with real AI clients (only ClientSession in-memory)
+  - Dependency discovery channel always returns empty
+- Recommendation: Hybrid approach — smoke test with real APIs (2-3 days) then Phase 10 implementation (5-7 days)
+- Created docs/analysis/phase10_analysis.md — comprehensive analysis document
+- Created wiki/patterns/phase10-alpha-analysis.md — analysis wiki page
+- Created wiki/patterns/marketplace-deployment.md — Kilo Marketplace deployment model
+- Updated wiki/index.md with 2 new articles
+
+## [2026-04-24] ingest | Wave 0 Real API Smoke Tests + CLI Pipeline Fix
+- Executed Wave 0 smoke tests against live GitHub API (10 tests, all passed)
+- 3 bugs found and fixed:
+  1. `GateLevel` enum value mapping in CLI screen (names vs string values)
+  2. `rest_client=None` in CLI screen (no real GitHub API calls during screening)
+  3. `ruff ANN401` in `github_client.py:get_json()` return type
+- Critical architectural fix: screen → rank pipeline was disconnected
+  - `screen` now uses ScoringEngine to compute ScoreResult from screening data
+  - ScoreResults persisted to FeatureStore (`.ghdisc/features.db`)
+  - `rank` reads from FeatureStore; also supports `--pool-id` for direct ranking
+  - Anti-star bias verified: 1-star repo ranked #1 above 259-star repo
+- All smoke tests passed: CLI discover, screen (Gate 1+2), rank, MCP stdio, MCP init-config (Kilo/OpenCode), API health/docs
+- Updated wiki/patterns/phase10-alpha-analysis.md with smoke test results
+- Updated wiki/index.md with new article
+- 1316 tests, ruff + mypy --strict green

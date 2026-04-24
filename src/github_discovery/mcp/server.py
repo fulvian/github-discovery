@@ -165,7 +165,13 @@ def serve(settings: Settings | None = None) -> None:
 
     Entry point for CLI: ``python -m github_discovery.mcp serve``
     """
+    from github_discovery.logging import configure_logging
+
     _settings = settings or Settings()
+    configure_logging(
+        log_level=_settings.log_level,
+        debug=_settings.debug,
+    )
     server = create_server(_settings)
     transport_args = get_transport_args(_settings.mcp)
     server.run(**transport_args)  # type: ignore[arg-type]

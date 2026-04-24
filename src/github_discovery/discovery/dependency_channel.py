@@ -281,6 +281,14 @@ class DependencyChannel:
             )
             return []
 
+        if not isinstance(sbom_data, dict):
+            logger.warning(
+                "dependency_channel_sbom_unexpected_type",
+                owner=owner,
+                repo=repo,
+                type=type(sbom_data).__name__,
+            )
+            return []
         return self._parse_sbom(sbom_data)
 
     @staticmethod

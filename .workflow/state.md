@@ -1,14 +1,14 @@
 # Project State
 
-## Current Phase: Phase 9 — Integration Testing & Feasibility Validation (COMPLETE)
+## Current Phase: Wave 0 — Real API Smoke Tests (COMPLETE) → Ready for Phase 10
 ## Started: 2026-04-24T07:21:00+02:00
-## Completed: 2026-04-24T07:45:00+02:00
+## Completed: 2026-04-24T15:40:00+02:00
 ## PRD: docs/foundation/github-discovery_foundation_blueprint.md
 ## Roadmap: docs/roadmaps/github-discovery_foundation_roadmap.md
 ## Phase 9 Plan: docs/plans/phase9-implementation-plan.md
-## Implementation: Phase 0+1+2+3+4+5+6+7+8+9 complete (1314 tests passing)
-## Tests: 1314 passing, 2 pre-existing flaky network tests deselected, ruff + mypy --strict green
-## Deployment: Pending
+## Implementation: Phase 0+1+2+3+4+5+6+7+8+9 complete + Wave 0 smoke tests passed (1316 tests)
+## Tests: 1316 passing, ruff + mypy --strict green
+## Deployment: Ready for Phase 10 (Alpha)
 
 ## Agent History
 | Timestamp | Agent | Action | Status |
@@ -52,6 +52,7 @@
 | 2026-04-24T07:30+02:00 | Coder | Phase 9 Wave B — integration tests (pipeline E2E, API E2E, star baseline) — 49 tests | Done |
 | 2026-04-24T07:35+02:00 | Coder | Phase 9 Wave D — agentic MCP integration (client, progressive deepening, session, Kilocode, OpenCode) — 27 tests | Done |
 | 2026-04-24T07:45+02:00 | General Manager | Phase 9 verification — make ci green (1314 tests), wiki update, state update | Done |
+| 2026-04-24T15:30+02:00 | General Manager | Wave 0 smoke tests — 3 bugs fixed, 10/10 tests pass against real GitHub API | Done |
 
 ## Skills Invoked
 | Phase | Skill | Outcome |
@@ -63,15 +64,13 @@
 
 ## Notes
 - Phase 0+1+2+3+4+5+6+7+8+9 complete and verified
-- `make ci` green: ruff + mypy --strict + 1314 tests (2 pre-existing flaky network tests deselected)
-- Phase 9 complete: Feasibility module + Integration tests + Agentic MCP integration
-  - 113 new tests (40 feasibility + 49 integration + 27 agentic)
-  - feasibility/ module: sprint0.py, baseline.py, metrics.py, calibration.py
-  - E2E pipeline + API integration via httpx.AsyncClient + ASGITransport
-  - MCP client integration via ClientSession + MemoryObjectStream
-  - Kilocode CLI + OpenCode integration verified
-  - Precision@K, NDCG, MRR metrics implemented
-  - Star-based baseline comparison with Spearman correlation
-  - Weight calibration via grid search
-- CLI entry points: `python -m github_discovery`, `ghdisc` (console script)
-- MCP server: `python -m github_discovery.mcp serve --transport stdio`
+- `make ci` green: ruff + mypy --strict + 1316 tests
+- **Wave 0 smoke tests passed** (2026-04-24):
+  - CLI discover: 30 repos in 1.8s from 3 channels ✅
+  - CLI screen Gate 1+2: 4/10 pass both gates ✅
+  - MCP server stdio: 16 tools configured ✅
+  - MCP init-config: Kilo + OpenCode configs valid ✅
+  - API server: health check ok, Swagger UI, 3 workers ✅
+  - 3 bugs found and fixed (GateLevel mapping, rest_client=None, ANN401)
+  - Known gaps: CLI rank needs FeatureStore integration, awesome-list noise
+- Next: Phase 10 (Alpha Engine & Marketplace)

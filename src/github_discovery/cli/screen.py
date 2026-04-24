@@ -1,4 +1,8 @@
-"""CLI command: ghdisc screen — screen candidates through quality gates."""
+"""CLI command: ghdisc screen — screen candidates through quality gates.
+
+After screening, scores are computed via ScoringEngine and persisted
+to the FeatureStore so that ``ghdisc rank`` can consume them.
+"""
 
 from __future__ import annotations
 
@@ -56,7 +60,7 @@ def register(app: typer.Typer) -> None:
         settings = get_settings()
         fmt = resolve_output_format(output)
 
-        gate_map = {"1": "METADATA", "2": "STATIC_SECURITY", "both": "BOTH"}
+        gate_map = {"1": "1", "2": "2", "both": "2"}
         gate_level_raw = gate_map.get(gate.lower())
         if gate_level_raw is None:
             exit_with_error(f"Invalid gate level: {gate}. Use 1, 2, or both.")
@@ -84,33 +88,50 @@ async def _screen_pool(
     session_id: str | None,
     fmt: str,
 ) -> None:
-    """Run screening on a candidate pool."""
+    """Run screening on a candidate pool and persist scores."""
+    import structlog
+
     from github_discovery.cli.formatters import format_output
     from github_discovery.cli.utils import exit_with_error, get_output_console
+    from github_discovery.config import Settings
+    from github_discovery.discovery.github_client import GitHubRestClient
     from github_discovery.discovery.pool import PoolManager
     from github_discovery.models.enums import GateLevel
+    from github_discovery.scoring.engine import ScoringEngine
+    from github_discovery.scoring.feature_store import FeatureStore
     from github_discovery.screening.gate1_metadata import Gate1MetadataScreener
     from github_discovery.screening.gate2_static import Gate2StaticScreener
     from github_discovery.screening.orchestrator import ScreeningOrchestrator
     from github_discovery.screening.types import ScreeningContext
 
+    logger = structlog.get_logger("github_discovery.cli.screen")
+    real_settings = settings if isinstance(settings, Settings) else Settings()
+
     pool_mgr = PoolManager()
+    rest_client = GitHubRestClient(real_settings.github)
+    store = FeatureStore(db_path=".ghdisc/features.db")
+    scoring_engine = ScoringEngine(settings=real_settings.scoring, store=store)
     try:
+        await store.initialize()
+
         pool = await pool_mgr.get_pool(pool_id)
         if pool is None:
             exit_with_error(f"Pool not found: {pool_id}")
             return  # unreachable: exit_with_error raises SystemExit
 
+        # Build a lookup from full_name → RepoCandidate
+        candidate_map = {c.full_name: c for c in pool.candidates}
+
         gate1 = Gate1MetadataScreener(
-            rest_client=None,  # type: ignore[arg-type]
-            settings=settings,  # type: ignore[arg-type]
+            rest_client=rest_client,
+            settings=real_settings.screening,
         )
         gate2 = Gate2StaticScreener(
-            rest_client=None,  # type: ignore[arg-type]
-            settings=settings,  # type: ignore[arg-type]
-            github_settings=settings,  # type: ignore[arg-type]
+            rest_client=rest_client,
+            settings=real_settings.screening,
+            github_settings=real_settings.github,
         )
-        orch = ScreeningOrchestrator(settings, gate1, gate2)  # type: ignore[arg-type]
+        orch = ScreeningOrchestrator(real_settings, gate1, gate2)
 
         context = ScreeningContext(
             candidates=pool.candidates,
@@ -122,6 +143,28 @@ async def _screen_pool(
         )
 
         results = await orch.screen(context)
+
+        # Score each screening result and persist to FeatureStore
+        scored_count = 0
+        for r in results:
+            candidate = candidate_map.get(r.full_name)
+            if candidate is None:
+                continue
+
+            score_result = scoring_engine.score(
+                candidate=candidate,
+                screening=r,
+                assessment=None,
+            )
+            await store.put(score_result)
+            scored_count += 1
+
+        logger.info(
+            "screen_scores_persisted",
+            pool_id=pool_id,
+            total=len(results),
+            scored=scored_count,
+        )
 
         # Convert results to display format
         display_data = [
@@ -149,4 +192,6 @@ async def _screen_pool(
     except Exception as e:
         exit_with_error(f"Screening failed: {e}")
     finally:
+        await store.close()
+        await rest_client.close()
         await pool_mgr.close()
