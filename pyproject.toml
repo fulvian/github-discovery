@@ -148,6 +148,7 @@ markers = [
     "integration: marks integration tests (deselect with '-m \"not integration\"')",
     "slow: marks slow tests (deselect with '-m \"not slow\"')",
     "agentic: marks agentic/MCP integration tests",
+    "feasibility: marks Sprint 0 feasibility validation tests",
 ]
 asyncio_mode = "auto"
 filterwarnings = [

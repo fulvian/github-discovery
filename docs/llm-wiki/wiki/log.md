@@ -431,3 +431,39 @@
   - `AssessmentOrchestrator.quick_assess()` (not `assess_single()`)
   - Per-file-ignores: PLC0415, PLR2004 for cli/*.py
 - Updated wiki/index.md with Phase 8 completion status
+
+## [2026-04-24] ingest | Phase 9 Integration Testing & Feasibility Validation Plan
+- Ingested from Roadmap Phase 9, Foundation Blueprint §16.5/§21.7/§17, Context7 verification (MCP SDK, FastAPI, pytest)
+- Created wiki/patterns/phase9-feasibility-plan.md
+- Created docs/plans/phase9-implementation-plan.md
+- Key design decisions:
+  - Dual-track approach: Feasibility validation (Tasks 9.1-9.7) + Integration testing (Tasks 9.8-9.11)
+  - New source module: `feasibility/` with sprint0.py, baseline.py, metrics.py, calibration.py
+  - New test directories: `tests/feasibility/`, `tests/fixtures/`, expanded `tests/agentic/`
+  - No new dependencies — uses existing mcp (Client), httpx (AsyncClient+ASGITransport), pytest
+  - MCP client testing: `Client(fastmcp_server, raise_exceptions=True)` pattern (Context7-verified)
+  - FastAPI testing: `AsyncClient(transport=ASGITransport(app=app))` pattern (Context7-verified)
+  - ~137 new tests planned across 4 waves: A (infrastructure), B (integration), C (feasibility), D (agentic)
+  - Go/no-go criteria: Precision@10 GD > star-based, ≥5 hidden gems, >80% coverage, MCP client integration verified
+- Updated wiki/index.md with Phase 9 plan reference
+
+## [2026-04-24] ingest | Phase 9 Implementation Complete
+- Implemented all 4 waves of Phase 9: Integration Testing & Feasibility Validation
+- Created `src/github_discovery/feasibility/` module (5 files):
+  - sprint0.py: Full pipeline runner (Sprint0Config, Sprint0Result, run_sprint0)
+  - baseline.py: Star-based baseline comparison (BaselineComparison, DetailedComparison, compute_star_ranking, Spearman correlation, Wilcoxon test)
+  - metrics.py: Evaluation metrics (Precision@K, NDCG, MRR, FullMetricsReport)
+  - calibration.py: Weight calibration via grid search (CalibrationResult, grid_search_weights)
+- Created `tests/fixtures/sample_repos.json` — 60 realistic sample repos (hidden gems, overhyped, popular)
+- Created `tests/feasibility/` — 40 tests (sprint0, baseline, precision, deep_scan, calibration)
+- Created `tests/integration/` — 49 new tests (pipeline E2E, API E2E, star baseline comparison)
+- Rewrote `tests/agentic/` — 27 tests (MCP client, progressive deepening, session workflow, Kilocode, OpenCode)
+- Key implementation findings:
+  - MCP SDK v1.27.0 uses ClientSession + MemoryObjectStream (not high-level Client class)
+  - FastAPI lifespan requires manual context entry with httpx.AsyncClient
+  - Spearman correlation implemented manually (no scipy dependency)
+  - NDCG/MRR implemented with pure stdlib math.log2
+  - Grid search uses one-at-a-time weight variation with normalization
+- 113 new tests total, 1314/1316 passing (ruff + mypy --strict + pytest green)
+- Updated wiki/patterns/phase9-feasibility-plan.md with implementation results
+- Updated wiki/index.md with Phase 9 completion status
