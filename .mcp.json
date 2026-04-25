@@ -13,7 +13,7 @@
       "command": "/home/fulvio/coding/github-discovery/.venv/bin/python",
       "args": ["-m", "github_discovery.mcp", "serve", "--transport", "stdio"],
       "env": {
-        "GHDISC_GITHUB_TOKEN": "${GITHUB_TOKEN}",
+        "GHDISC_GITHUB_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}",
         "GHDISC_SESSION_BACKEND": "sqlite"
       }
     }
