@@ -1,0 +1,56 @@
+id: github-discovery
+name: GitHub Discovery
+description: MCP-native agentic discovery engine that finds high-quality GitHub repositories
+  independent of popularity (stars). Uses tiered scoring from discovery through screening,
+  deep LLM assessment, and explainable ranking with anti-star bias.
+author: fulvian
+url: https://github.com/fulvian/github-discovery
+tags:
+  - github
+  - repository-discovery
+  - code-quality
+  - scoring
+  - ranking
+  - hidden-gems
+  - mcp
+prerequisites:
+  - Python 3.12+
+  - GitHub Personal Access Token (generate at https://github.com/settings/tokens/new)
+content:
+  - name: UVX
+    prerequisites:
+      - Python 3.12+
+      - uv
+    content: |
+      {
+        "command": "uvx",
+        "args": ["github-discovery", "mcp", "serve", "--transport", "stdio"],
+        "env": {
+          "GHDISC_GITHUB_TOKEN": "{{GHDISC_GITHUB_TOKEN}}"
+        }
+      }
+  - name: Docker
+    prerequisites:
+      - Docker
+    content: |
+      {
+        "command": "docker",
+        "args": ["run", "-i", "--rm", "-e", "GHDISC_GITHUB_TOKEN",
+                 "github-discovery/mcp-server"],
+        "env": {
+          "GHDISC_GITHUB_TOKEN": "{{GHDISC_GITHUB_TOKEN}}"
+        }
+      }
+  - name: Remote Server
+    content: |
+      {
+        "type": "streamable-http",
+        "url": "https://your-server-url.com/mcp",
+        "headers": {
+          "Authorization": "Bearer {{GHDISC_GITHUB_TOKEN}}"
+        }
+      }
+parameters:
+  - name: GitHub Personal Access Token
+    key: GHDISC_GITHUB_TOKEN
+    placeholder: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (classic PAT from https://github.com/settings/tokens/new)

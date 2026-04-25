@@ -1,0 +1,64 @@
+# =============================================================================
+# GitHub Discovery — Docker Build Context Exclusions
+# =============================================================================
+
+# Version control
+.git/
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Project data (mounted as volume at runtime)
+.ghdisc/
+
+# Environment files (injected at runtime via docker-compose)
+.env
+.env.*
+
+# Documentation (not needed in production image)
+docs/
+
+# Tests (not needed in production image)
+tests/
+
+# CI/CD and workflow
+.workflow/
+.github/
+.kilo/
+
+# Development tooling
+.pre-commit-config.yaml
+
+# Markdown files (README is referenced by pyproject.toml but not needed in image)
+*.md
+!README.md
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Docker files themselves
+Dockerfile*
+docker-compose*
+.dockerignore

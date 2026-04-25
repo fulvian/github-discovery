@@ -1,0 +1,115 @@
+# =============================================================================
+# GitHub Discovery — Docker Compose
+# =============================================================================
+# Usage:
+#   API server:     docker compose up api
+#   MCP stdio:      docker compose run --rm -i mcp-server
+#   Worker:         docker compose up worker
+#   Full stack:     docker compose up
+#
+# Configuration:
+#   Copy .env.example to .env and set required variables:
+#     GHDISC_GITHUB_TOKEN=ghp_xxxxx
+#     GHDISC_ASSESSMENT_NANOGPT_API_KEY=xxxxx
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # FastAPI REST server
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["api"]
+    ports:
+      - "${GHDISC_API_PORT:-8000}:8000"
+    environment:
+      GHDISC_GITHUB_TOKEN: ${GHDISC_GITHUB_TOKEN:-}
+      GHDISC_API_HOST: "0.0.0.0"
+      GHDISC_API_PORT: "8000"
+      GHDISC_API_WORKERS: ${GHDISC_API_WORKERS:-2}
+      GHDISC_API_JOB_STORE_PATH: /home/ghdisc/.ghdisc/jobs.db
+      GHDISC_MCP_SESSION_STORE_PATH: /home/ghdisc/.ghdisc/sessions.db
+      GHDISC_LOG_LEVEL: ${GHDISC_LOG_LEVEL:-INFO}
+      GHDISC_ASSESSMENT_NANOGPT_API_KEY: ${GHDISC_ASSESSMENT_NANOGPT_API_KEY:-}
+    volumes:
+      - ghdisc-data:/home/ghdisc/.ghdisc
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "2.0"
+        reservations:
+          memory: 256M
+          cpus: "0.5"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MCP stdio server (for agent integration via docker compose run)
+  # ---------------------------------------------------------------------------
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["mcp"]
+    stdin_open: true
+    tty: false
+    environment:
+      GHDISC_GITHUB_TOKEN: ${GHDISC_GITHUB_TOKEN:-}
+      GHDISC_MCP_SESSION_STORE_PATH: /home/ghdisc/.ghdisc/sessions.db
+      GHDISC_MCP_TRANSPORT: stdio
+      GHDISC_LOG_LEVEL: ${GHDISC_LOG_LEVEL:-INFO}
+      GHDISC_ASSESSMENT_NANOGPT_API_KEY: ${GHDISC_ASSESSMENT_NANOGPT_API_KEY:-}
+    volumes:
+      - ghdisc-data:/home/ghdisc/.ghdisc
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+        reservations:
+          memory: 128M
+          cpus: "0.25"
+    profiles:
+      - mcp
+
+  # ---------------------------------------------------------------------------
+  # Background scoring worker
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["worker"]
+    environment:
+      GHDISC_GITHUB_TOKEN: ${GHDISC_GITHUB_TOKEN:-}
+      GHDISC_API_JOB_STORE_PATH: /home/ghdisc/.ghdisc/jobs.db
+      GHDISC_MCP_SESSION_STORE_PATH: /home/ghdisc/.ghdisc/sessions.db
+      GHDISC_API_WORKERS: ${GHDISC_WORKER_CONCURRENCY:-4}
+      GHDISC_LOG_LEVEL: ${GHDISC_LOG_LEVEL:-INFO}
+      GHDISC_ASSESSMENT_NANOGPT_API_KEY: ${GHDISC_ASSESSMENT_NANOGPT_API_KEY:-}
+    volumes:
+      - ghdisc-data:/home/ghdisc/.ghdisc
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  ghdisc-data:
+    driver: local
