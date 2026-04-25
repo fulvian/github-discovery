@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
+
+if TYPE_CHECKING:
+    from github_discovery.config import Settings
+    from github_discovery.discovery.pool import PoolManager
+    from github_discovery.models.candidate import RepoCandidate
+    from github_discovery.models.screening import ScreeningResult
+    from github_discovery.scoring.feature_store import FeatureStore
 
 
 def register(app: typer.Typer) -> None:
@@ -84,6 +91,130 @@ def register(app: typer.Typer) -> None:
         )
 
 
+async def _resolve_candidates_async(
+    pool_id: str | None,
+    repo_urls: list[str] | None,
+    max_repos: int,
+) -> tuple[list[RepoCandidate], PoolManager]:
+    """Resolve candidates from pool ID or repo URLs."""
+    from github_discovery.cli.utils import exit_with_error
+    from github_discovery.discovery.pool import PoolManager
+
+    pool_mgr = PoolManager()
+    candidates: list[RepoCandidate] = []
+
+    if pool_id:
+        pool = await pool_mgr.get_pool(pool_id)
+        if pool is None:
+            exit_with_error(f"Pool not found: {pool_id}")
+            return [], pool_mgr  # unreachable
+        candidates = pool.candidates[:max_repos]
+    elif repo_urls:
+        from datetime import UTC, datetime
+
+        from github_discovery.models.candidate import RepoCandidate
+        from github_discovery.models.enums import CandidateStatus, DiscoveryChannel
+
+        for url in repo_urls:
+            parts = url.rstrip("/").split("/")
+            if len(parts) >= 2:
+                full_name = f"{parts[-2]}/{parts[-1]}"
+                now = datetime.now(tz=UTC)
+                candidates.append(
+                    RepoCandidate(
+                        full_name=full_name,
+                        url=url,
+                        html_url=url,
+                        api_url=f"https://api.github.com/repos/{full_name}",
+                        owner_login=parts[-2],
+                        source_channel=DiscoveryChannel.SEARCH,
+                        status=CandidateStatus.DISCOVERED,
+                        created_at=now,
+                        updated_at=now,
+                    ),
+                )
+
+    return candidates[:max_repos], pool_mgr
+
+
+async def _build_screening_lookup(
+    candidates: list[RepoCandidate],
+    real_settings: Settings,
+    store: FeatureStore,
+) -> dict[str, ScreeningResult]:
+    """Build screening results lookup from FeatureStore for hard gate enforcement."""
+    from github_discovery.models.screening import (
+        MetadataScreenResult,
+        ScreeningResult,
+        StaticScreenResult,
+    )
+
+    screening_lookup: dict[str, ScreeningResult] = {}
+    for candidate in candidates:
+        score_result = await store.get_latest(candidate.full_name)
+        if score_result is not None:
+            gate1_pass = score_result.gate1_total >= real_settings.screening.min_gate1_score
+            gate2_pass = score_result.gate2_total >= real_settings.screening.min_gate2_score
+            screening_lookup[candidate.full_name] = ScreeningResult(
+                full_name=candidate.full_name,
+                commit_sha=score_result.commit_sha,
+                gate1=MetadataScreenResult(
+                    full_name=candidate.full_name,
+                    gate1_total=score_result.gate1_total,
+                    gate1_pass=gate1_pass,
+                    threshold_used=real_settings.screening.min_gate1_score,
+                ),
+                gate2=StaticScreenResult(
+                    full_name=candidate.full_name,
+                    gate2_total=score_result.gate2_total,
+                    gate2_pass=gate2_pass,
+                    threshold_used=real_settings.screening.min_gate2_score,
+                ),
+            )
+
+    return screening_lookup
+
+
+async def _run_assessments(
+    candidates: list[RepoCandidate],
+    screening_lookup: dict[str, ScreeningResult],
+    real_settings: Settings,
+) -> list[dict[str, object]]:
+    """Run deep assessment on each candidate with screening gate enforcement."""
+    from github_discovery.assessment.orchestrator import AssessmentOrchestrator
+
+    orch = AssessmentOrchestrator(real_settings)
+    display_results: list[dict[str, object]] = []
+
+    for candidate in candidates:
+        screening = screening_lookup.get(candidate.full_name)
+        try:
+            result = await orch.quick_assess(candidate, screening=screening)
+            display_results.append(
+                {
+                    "full_name": result.full_name,
+                    "overall_score": result.overall_quality,
+                    "confidence": result.overall_confidence,
+                    "passed": result.gate3_pass,
+                    "dimension_scores": [
+                        {"dimension": ds.dimension.value, "score": ds.value}
+                        for ds in result.dimensions.values()
+                    ],
+                    "tokens_used": (result.token_usage.total_tokens if result.token_usage else 0),
+                }
+            )
+        except Exception as e:
+            display_results.append(
+                {
+                    "full_name": candidate.full_name,
+                    "error": str(e),
+                    "passed": False,
+                }
+            )
+
+    return display_results
+
+
 async def _deep_eval(
     settings: object,
     pool_id: str | None,
@@ -97,82 +228,35 @@ async def _deep_eval(
     """Run deep assessment on repos."""
     from github_discovery.cli.formatters import format_output
     from github_discovery.cli.utils import exit_with_error, get_output_console
-    from github_discovery.discovery.pool import PoolManager
+    from github_discovery.config import Settings
+    from github_discovery.scoring.feature_store import FeatureStore
 
-    pool_mgr = PoolManager()
+    real_settings = settings if isinstance(settings, Settings) else Settings()
 
+    candidates, pool_mgr = await _resolve_candidates_async(
+        pool_id,
+        repo_urls,
+        max_repos,
+    )
+
+    if not candidates:
+        exit_with_error("No candidates to assess.")
+        return  # unreachable
+
+    store = FeatureStore(db_path=".ghdisc/features.db")
     try:
-        # Get candidates from pool or URLs
-        candidates = []
-        if pool_id:
-            pool = await pool_mgr.get_pool(pool_id)
-            if pool is None:
-                exit_with_error(f"Pool not found: {pool_id}")
-                return  # unreachable: exit_with_error raises SystemExit
-            candidates = pool.candidates[:max_repos]
-        elif repo_urls:
-            from datetime import UTC, datetime
+        await store.initialize()
 
-            from github_discovery.models.candidate import RepoCandidate
-            from github_discovery.models.enums import CandidateStatus, DiscoveryChannel
-
-            for url in repo_urls:
-                parts = url.rstrip("/").split("/")
-                if len(parts) >= 2:
-                    full_name = f"{parts[-2]}/{parts[-1]}"
-                    now = datetime.now(tz=UTC)
-                    candidates.append(
-                        RepoCandidate(
-                            full_name=full_name,
-                            url=url,
-                            html_url=url,
-                            api_url=f"https://api.github.com/repos/{full_name}",
-                            owner_login=parts[-2],
-                            source_channel=DiscoveryChannel.SEARCH,
-                            status=CandidateStatus.DISCOVERED,
-                            created_at=now,
-                            updated_at=now,
-                        ),
-                    )
-
-        if not candidates:
-            exit_with_error("No candidates to assess.")
-            return  # unreachable: exit_with_error raises SystemExit
-
-        # Hard gate enforcement: in production, we'd check screening results.
-        # For CLI, we proceed and let the orchestrator enforce hard gates.
-        from github_discovery.assessment.orchestrator import AssessmentOrchestrator
-
-        orch = AssessmentOrchestrator(settings)  # type: ignore[arg-type]
-
-        # Assess each candidate
-        display_results: list[dict[str, object]] = []
-        for candidate in candidates:
-            try:
-                result = await orch.quick_assess(candidate, screening=None)
-                display_results.append(
-                    {
-                        "full_name": result.full_name,
-                        "overall_score": result.overall_quality,
-                        "confidence": result.overall_confidence,
-                        "passed": result.gate3_pass,
-                        "dimension_scores": [
-                            {"dimension": ds.dimension.value, "score": ds.value}
-                            for ds in result.dimensions.values()
-                        ],
-                        "tokens_used": (
-                            result.token_usage.total_tokens if result.token_usage else 0
-                        ),
-                    }
-                )
-            except Exception as e:
-                display_results.append(
-                    {
-                        "full_name": candidate.full_name,
-                        "error": str(e),
-                        "passed": False,
-                    }
-                )
+        screening_lookup = await _build_screening_lookup(
+            candidates,
+            real_settings,
+            store,
+        )
+        display_results = await _run_assessments(
+            candidates,
+            screening_lookup,
+            real_settings,
+        )
 
         formatted = format_output(
             data={"results": display_results, "total": len(display_results)},
@@ -188,3 +272,4 @@ async def _deep_eval(
         exit_with_error(f"Deep evaluation failed: {e}")
     finally:
         await pool_mgr.close()
+        await store.close()

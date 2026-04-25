@@ -73,7 +73,7 @@ class RepomixAdapter:
         config = self._build_config()
 
         try:
-            processor = RepoProcessor(repo_url, config=config)
+            processor = RepoProcessor(repo_url=repo_url, config=config)
             result = await asyncio.wait_for(
                 asyncio.to_thread(
                     processor.process,
