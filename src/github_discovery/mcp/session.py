@@ -6,6 +6,8 @@ progressive deepening in MCP workflows (Blueprint §21.4).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import aiosqlite
 import structlog
 
@@ -38,6 +40,9 @@ class SessionManager:
 
     async def initialize(self) -> None:
         """Open database connection and create tables."""
+        # Ensure parent directory exists (critical when CWD is not the project dir)
+        db_path = Path(self._db_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(self._db_path)
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(_CREATE_TABLE_SQL)

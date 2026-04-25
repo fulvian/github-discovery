@@ -50,7 +50,7 @@ TOOLSET_MAP: dict[str, set[str]] = {
 }
 
 
-def get_enabled_tools(settings: Settings) -> list[str]:
+def get_enabled_tools(settings: Settings, *, log: bool = True) -> list[str]:
     """Get list of enabled MCP tools based on configuration.
 
     Respects GHDISC_MCP_ENABLED_TOOLSETS and GHDISC_MCP_EXCLUDE_TOOLS.
@@ -65,15 +65,18 @@ def get_enabled_tools(settings: Settings) -> list[str]:
 
     result = [t for t in ALL_TOOLS if t in enabled and t not in exclude]
 
-    logger.info(
-        "mcp_tools_configured",
-        total=len(ALL_TOOLS),
-        enabled=len(result),
-        excluded=len(exclude),
-    )
+    if log:
+        logger.info(
+            "mcp_tools_configured",
+            total=len(ALL_TOOLS),
+            enabled=len(result),
+            excluded=len(exclude),
+        )
+
     return result
 
 
 def should_register_tool(tool_name: str, settings: Settings) -> bool:
     """Check if a specific tool should be registered."""
-    return tool_name in get_enabled_tools(settings)
+    # Use log=False to avoid logging on every tool registration check
+    return tool_name in get_enabled_tools(settings, log=False)
