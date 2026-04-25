@@ -199,9 +199,17 @@ async def _run_assessments(
         try:
             result = await orch.quick_assess(candidate, screening=screening)
 
+            # Preserve star count from FeatureStore if candidate has none
+            # (candidates from --repo-urls may not have stars populated)
+            scored_candidate = candidate
+            if candidate.stars == 0:
+                prev_score = await store.get_latest(candidate.full_name)
+                if prev_score is not None and prev_score.stars > 0:
+                    scored_candidate = candidate.model_copy(update={"stars": prev_score.stars})
+
             # Re-score with Gate 3 assessment and persist to FeatureStore
             score_result = scoring_engine.score(
-                candidate=candidate,
+                candidate=scored_candidate,
                 screening=screening,
                 assessment=result,
             )
