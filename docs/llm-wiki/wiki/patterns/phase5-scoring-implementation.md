@@ -47,6 +47,7 @@ The scoring system was redesigned from anti-star bias to star-neutral:
 - Combines Gate 1 (metadata sub-scores), Gate 2 (static/security sub-scores), and Gate 3 (deep assessment dimension scores) into a unified `ScoreResult`
 - Per-dimension scoring uses the best available signal: Gate 3 (LLM) > Gate 2 (static) > Gate 1 (metadata) > default
 - Composite `quality_score` computed as domain-weighted average of dimension scores
+- **Phantom score fix (2026-04-25)**: `_apply_weights()` now excludes dimensions with `confidence <= 0.0` from the weighted average. Previously, `default_neutral (0.5, confidence=0.0)` for FUNCTIONALITY and INNOVATION was included, inflating quality_score with data that was never actually evaluated
 - `DimensionScoreInfo` tracks source gate and confidence for each dimension
 - **FeatureStore integration**: Optional `store` parameter in constructor. `score()` remains sync (backward compatible); new `async score_cached()` checks store before computing and writes results back after
 

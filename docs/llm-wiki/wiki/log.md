@@ -552,3 +552,46 @@
 - LLM assessment used NanoGPT provider with heuristic fallback for large repos
 - Created test_report_1.md with full E2E analysis
 - Updated README.md to reflect star-neutral architecture and current project state
+
+## [2026-04-25] ingest | GitHub API Rate Limit Fix — Exponential Backoff with Retry
+
+### Bug: Score 0.0 caused by rate limit fail-fast
+
+The `GitHubRestClient` was raising `RateLimitError` immediately when rate limit was low (remaining < watermark).
+`gate1_metadata.py` caught the exception → returned empty data → `score=0` for all affected repos.
+This was NOT a real evaluation — it was a silent failure from not respecting GitHub's rate limits.
+
+### Root Cause
+
+1. `_check_rate_limit()` raised `RateLimitError` when `remaining < 50` — too aggressive
+2. On 403 rate limit response, immediately raised instead of retrying
+3. `gate1_metadata.py` `_fetch()` caught all exceptions → returned `{}` → zero scores
+4. No exponential backoff, no wait-for-reset, no retry
+
+### Fix Applied to `GitHubRestClient` (`discovery/github_client.py`)
+
+1. **New `_retry_on_rate_limit()`**: wraps any request with exponential backoff (1s→2s→4s→8s→16s) with random jitter, up to 5 attempts, max 60s wait
+2. **New `_await_if_rate_limited()`**: proactively waits until `X-RateLimit-Reset` time when `X-RateLimit-Remaining` is below watermark (uses exact reset timestamp from GitHub)
+3. **`get()`, `get_all_pages()`, `search()`**: now use retry instead of fail-fast
+4. **Lowered watermarks**: core 50→10, search 5→3 (previous values were too conservative — stopped at 50 remaining out of 5000)
+
+### Best Practices Applied
+
+- Exponential backoff with jitter (avoids thundering herd)
+- Wait for `X-RateLimit-Reset` (exact reset time from GitHub)
+- Proactive waiting before requests (not just reactive after 403)
+- 5 retries with 60s cap per wait
+
+### Tests Updated
+
+3 tests renamed/rewritten to reflect retry behavior:
+- `test_rate_limit_waits_and_retries` (was `test_rate_limit_enforcement_raises`)
+- `test_search_waits_and_retries` (was `test_search_rate_limiting`)
+- `test_403_rate_limit_retries_and_succeeds` (was `test_403_rate_limit_raises`)
+- All mock `asyncio.sleep` to skip backoff waits
+
+### Commits
+
+- `01a2987` — fix: exclude phantom 0.5 defaults from composite quality score
+- `e75e8f4` — docs: update README, LLM wiki, and E2E test report for star-neutral system
+- `083db41` — fix: add exponential backoff with retry to GitHub API client

@@ -196,6 +196,19 @@ GHDISC_SESSION_BACKEND=sqlite         # sqlite | redis
 - **Context discipline**: short sessions, clear scope, reset between unrelated tasks
 - **No silent failures**: errors must be logged with retry strategy
 
+## Architecture Highlights
+
+### GitHub API Rate Limit Handling
+
+The GitHub API client (`GitHubRestClient`) implements robust rate limit management:
+
+- **Exponential backoff with jitter**: on 403 rate limit, retries with 1s→2s→4s→8s→16s waits (±50% random jitter)
+- **Proactive waiting**: monitors `X-RateLimit-Remaining` headers and waits before hitting the limit
+- **Wait-for-reset**: uses `X-RateLimit-Reset` timestamp to wait the exact amount of time needed
+- **5 retries max, 60s cap**: never hangs forever — eventual failure with clear error message
+
+This prevents phantom `quality_score=0.0` caused by API failures being silently swallowed.
+
 ## License
 
 MIT

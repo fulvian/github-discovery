@@ -14,7 +14,7 @@
 
 - [MCP Tool Specifications](apis/mcp-tools.md) — Complete specification of all MCP tools: discovery, screening, assessment, ranking, session management | Updated: 2026-04-22
 - [MCP Python SDK Verification](apis/mcp-sdk-verification.md) — Context7-verified MCP Python SDK API patterns: FastMCP, tools, resources, Context, progress notifications, transports | Updated: 2026-04-22
-- [GitHub API Patterns and Constraints](apis/github-api-patterns.md) — REST/GraphQL API usage patterns, rate limits, pagination, MCP composition | Updated: 2026-04-22
+- [GitHub API Patterns and Constraints](apis/github-api-patterns.md) — REST/GraphQL API usage patterns, rate limits with exponential backoff retry, pagination, MCP composition | Updated: 2026-04-25
 
 ## Domain
 
