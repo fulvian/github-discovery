@@ -10,7 +10,7 @@
       }
     },
     "github-discovery": {
-      "command": "python",
+      "command": "/home/fulvio/coding/github-discovery/.venv/bin/python",
       "args": ["-m", "github_discovery.mcp", "serve", "--transport", "stdio"],
       "env": {
         "GHDISC_GITHUB_TOKEN": "${GITHUB_TOKEN}",
