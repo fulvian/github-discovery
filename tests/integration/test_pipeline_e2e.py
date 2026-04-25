@@ -257,8 +257,8 @@ class TestScoringIntegration:
 class TestRankingIntegration:
     """Integration tests for the ranking engine."""
 
-    def test_ranking_anti_star_bias(self) -> None:
-        """Ranker applies anti-star bias: hidden gems can rank higher than popular repos."""
+    def test_ranking_star_neutral(self) -> None:
+        """Ranker applies star-neutral scoring: hidden gems can rank higher than popular repos."""
         from github_discovery.models.scoring import ScoreResult
 
         ranker = Ranker()

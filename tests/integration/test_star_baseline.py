@@ -1,7 +1,7 @@
 """Star-based baseline comparison integration tests.
 
 Compares GitHub Discovery ranking with simple star-based ranking
-to validate the anti-star bias value proposition.
+to validate the star-neutral quality scoring approach.
 """
 
 from __future__ import annotations

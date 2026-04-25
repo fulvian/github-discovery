@@ -1,4 +1,4 @@
-"""CLI command: ghdisc rank — rank repositories using anti-star bias scoring.
+"""CLI command: ghdisc rank — rank repositories using star-neutral scoring.
 
 Supports two modes:
 
@@ -22,7 +22,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command(
         name="rank",
-        help="Rank repositories using anti-star bias scoring.",
+        help="Rank repositories using star-neutral quality scoring.",
         rich_help_panel="Pipeline",
     )
     def rank(
@@ -45,7 +45,7 @@ def register(app: typer.Typer) -> None:
         ] = 0.3,
         min_value_score: Annotated[
             float,
-            typer.Option("--min-value-score", help="Minimum value score (anti-star bias)"),
+            typer.Option("--min-value-score", help="Minimum quality score threshold"),
         ] = 0.0,
         pool_id: Annotated[
             str | None,
@@ -64,7 +64,7 @@ def register(app: typer.Typer) -> None:
             typer.Option("--output", "-o", help="Output format: json|table|markdown|yaml"),
         ] = None,
     ) -> None:
-        """Rank repositories using anti-star bias scoring."""
+        """Rank repositories using star-neutral quality scoring."""
         from github_discovery.cli.utils import (
             get_settings,
             resolve_output_format,
@@ -360,14 +360,16 @@ def _print_ranking(result: object, fmt: str) -> None:
                 "value_score": round(repo.value_score, 4),
                 "confidence": round(repo.score_result.confidence, 4),
                 "stars": repo.stars,
+                "corroboration_level": repo.score_result.corroboration_level,
             }
             for i, repo in enumerate(ranking.ranked_repos)
         ],
         "hidden_gems": [
             {
                 "full_name": repo.full_name,
-                "value_score": round(repo.value_score, 4),
+                "quality_score": round(repo.quality_score, 4),
                 "stars": repo.stars,
+                "corroboration_level": repo.score_result.corroboration_level,
             }
             for repo in ranking.hidden_gems
         ],

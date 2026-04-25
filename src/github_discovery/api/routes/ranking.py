@@ -41,7 +41,7 @@ async def get_ranked_results(
     min_value_score: float = Query(
         default=0.0,
         ge=0.0,
-        description="Minimum value score (anti-star bias)",
+        description="Minimum quality score threshold",
     ),
     max_results: int = Query(
         default=20,
@@ -55,9 +55,10 @@ async def get_ranked_results(
     ranker: Ranker = Depends(get_ranker),  # noqa: B008
     scoring_engine: ScoringEngine = Depends(get_scoring_engine),  # noqa: B008
 ) -> dict[str, object]:
-    """Get ranked repository results with anti-star bias.
+    """Get ranked repository results with star-neutral quality scoring.
 
-    Returns repositories ranked by value score (quality / log10(stars + 10)).
+    Returns repositories ranked by quality score (star-neutral).
+    Stars are metadata only — they indicate corroboration level, not quality.
     Loads scored results from the feature store and ranks them within
     the specified domain.
     """

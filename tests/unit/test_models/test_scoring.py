@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from math import log10
+import pytest
 
 from github_discovery.models.enums import DomainType, ScoreDimension
 from github_discovery.models.scoring import (
@@ -19,30 +19,27 @@ from github_discovery.models.scoring import (
 
 
 class TestValueScore:
-    """Test anti-star bias Value Score computation."""
+    """Test star-neutral value score (value_score = quality_score)."""
 
-    def test_hidden_gem_high_value(self) -> None:
-        """Low stars + high quality = high value score (hidden gem)."""
+    def test_hidden_gem_value_equals_quality(self) -> None:
+        """Value score equals quality score regardless of stars (star-neutral)."""
         score = ScoreResult(
             full_name="hidden/gem",
             quality_score=0.9,
             stars=10,
         )
-        expected = 0.9 / log10(10 + 10)
-        assert abs(score.value_score - expected) < 0.001
-        assert score.value_score > 0.5  # High value score
+        assert score.value_score == pytest.approx(0.9, abs=0.001)
+        assert score.is_hidden_gem is True  # high quality + low stars
 
-    def test_popular_repo_moderate_value(self) -> None:
-        """High stars + high quality = moderate value score."""
+    def test_popular_repo_value_equals_quality(self) -> None:
+        """Popular repo value_score equals quality_score (no star penalty)."""
         score = ScoreResult(
             full_name="popular/repo",
             quality_score=0.9,
             stars=50000,
         )
-        expected = 0.9 / log10(50000 + 10)
-        assert abs(score.value_score - expected) < 0.001
-        # Should be lower than hidden gem with same quality
-        assert score.value_score < 0.2
+        assert score.value_score == pytest.approx(0.9, abs=0.001)
+        assert score.is_hidden_gem is False  # too many stars
 
     def test_zero_quality_zero_value(self) -> None:
         """Zero quality = zero value score."""
@@ -50,21 +47,80 @@ class TestValueScore:
         assert score.value_score == 0.0
 
     def test_zero_stars_high_quality(self) -> None:
-        """Zero stars + high quality = very high value score."""
+        """Zero stars + high quality = value_score = quality_score (no boost)."""
         score = ScoreResult(
             full_name="new/repo",
             quality_score=0.8,
             stars=0,
         )
-        expected = 0.8 / log10(0 + 10)
-        assert abs(score.value_score - expected) < 0.001
-        assert score.value_score > 0.5
+        assert score.value_score == pytest.approx(0.8, abs=0.001)
 
-    def test_anti_star_bias_ordering(self) -> None:
-        """Hidden gems rank higher than popular repos with same quality."""
+    def test_star_neutral_ordering(self) -> None:
+        """Star-neutral: same quality = same value_score, regardless of stars."""
         hidden = ScoreResult(full_name="hidden/gem", quality_score=0.85, stars=15)
         popular = ScoreResult(full_name="popular/repo", quality_score=0.85, stars=30000)
-        assert hidden.value_score > popular.value_score
+        assert hidden.value_score == pytest.approx(popular.value_score, abs=0.001)
+
+
+class TestCorroborationLevel:
+    """Test corroboration_level computed field."""
+
+    def test_new_repo(self) -> None:
+        assert (
+            ScoreResult(full_name="a/b", quality_score=0.5, stars=0).corroboration_level == "new"
+        )
+
+    def test_unvalidated(self) -> None:
+        assert (
+            ScoreResult(full_name="a/b", quality_score=0.5, stars=10).corroboration_level
+            == "unvalidated"
+        )
+
+    def test_emerging(self) -> None:
+        assert (
+            ScoreResult(full_name="a/b", quality_score=0.5, stars=100).corroboration_level
+            == "emerging"
+        )
+
+    def test_validated(self) -> None:
+        assert (
+            ScoreResult(full_name="a/b", quality_score=0.5, stars=1000).corroboration_level
+            == "validated"
+        )
+
+    def test_widely_adopted(self) -> None:
+        assert (
+            ScoreResult(full_name="a/b", quality_score=0.5, stars=10000).corroboration_level
+            == "widely_adopted"
+        )
+
+
+class TestIsHiddenGem:
+    """Test is_hidden_gem computed field (informational label)."""
+
+    def test_high_quality_low_stars(self) -> None:
+        score = ScoreResult(full_name="a/b", quality_score=0.7, stars=50)
+        assert score.is_hidden_gem is True
+
+    def test_high_quality_high_stars(self) -> None:
+        score = ScoreResult(full_name="a/b", quality_score=0.8, stars=500)
+        assert score.is_hidden_gem is False
+
+    def test_low_quality_low_stars(self) -> None:
+        score = ScoreResult(full_name="a/b", quality_score=0.3, stars=10)
+        assert score.is_hidden_gem is False
+
+    def test_boundary_quality(self) -> None:
+        """quality_score = 0.5 is the minimum for hidden gem."""
+        score = ScoreResult(full_name="a/b", quality_score=0.5, stars=50)
+        assert score.is_hidden_gem is True
+
+    def test_boundary_stars(self) -> None:
+        """stars = 99 is below threshold, 100 is at/below."""
+        below = ScoreResult(full_name="a/b", quality_score=0.7, stars=99)
+        assert below.is_hidden_gem is True
+        at_threshold = ScoreResult(full_name="a/b", quality_score=0.7, stars=100)
+        assert at_threshold.is_hidden_gem is False
 
 
 class TestDomainProfile:
@@ -147,7 +203,7 @@ class TestExplainabilityReport:
             full_name="test/repo",
             domain=DomainType.LIBRARY,
             overall_quality=0.8,
-            value_score=0.6,
+            value_score=0.8,
             strengths=["Excellent test coverage", "Clean architecture"],
             weaknesses=["Missing security policy"],
             hidden_gem_indicator=True,
@@ -162,7 +218,7 @@ class TestExplainabilityReport:
             full_name="test/repo",
             domain=DomainType.CLI,
             overall_quality=0.7,
-            value_score=0.5,
+            value_score=0.7,
         )
         json_str = report.model_dump_json()
         restored = ExplainabilityReport.model_validate_json(json_str)

@@ -39,7 +39,7 @@ class HiddenGem:
     Attributes:
         full_name: Repository full name (owner/repo).
         quality_score: GD quality score.
-        value_score: GD value score (anti-star bias).
+        value_score: GD value score (star-neutral: equals quality_score).
         gd_rank: Rank in GD ranking.
         star_rank: Rank in star-based ranking.
         stars: Star count.

@@ -172,7 +172,7 @@ DEEP_ASSESS_SPEC = MCPToolSpec(
 
 RANK_REPOS_SPEC = MCPToolSpec(
     name="rank_repos",
-    description="Rank repositories within a domain using anti-star bias scoring",
+    description="Rank repositories within a domain using star-neutral quality scoring",
     parameters_schema={
         "type": "object",
         "properties": {
@@ -213,7 +213,7 @@ DISCOVER_UNDERRATED_WORKFLOW = AgentWorkflowConfig(
         ),
         WorkflowStep(
             tool_name="rank_repos",
-            description="Rank with anti-star bias value score",
+            description="Rank with star-neutral quality score",
         ),
         WorkflowStep(
             tool_name="explain_repo",

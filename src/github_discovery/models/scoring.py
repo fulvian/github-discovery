@@ -1,18 +1,19 @@
 """Scoring, ranking, and explainability models (Layer D).
 
-Layer D produces the final ranked output with anti-star bias
-(Stars are context only — never primary ranking signal).
+Layer D produces the final ranked output with star-neutral ranking
+(Stars are metadata only — never a primary ranking signal, never a penalty).
 
-Key formulas:
-- ValueScore = quality_score / log10(stars + 10)  (Blueprint §5)
-- Ranking is intra-domain: no unfair cross-domain comparison
-- Explainability: every score is explainable per feature and dimension
+Key design principles:
+- quality_score = pure technical assessment (Gate 1+2+3), no star consideration
+- confidence = gate coverage + dimension assessment reliability
+- Stars = corroboration metadata: more stars = more validation, but no score change
+- Hidden gem = informational label (high quality + low stars), NOT a score modifier
+- Ranking = quality_score DESC, confidence DESC (star-neutral)
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from math import log10
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -20,6 +21,13 @@ from github_discovery.models.enums import DomainType, ScoreDimension
 
 # --- Constants ---
 _WEIGHT_TOLERANCE = 0.01
+
+# Star corroboration thresholds (stars tell HOW MANY validated, not WHAT the quality is)
+_CORROBORATION_UNVALIDATED = 50
+_CORROBORATION_EMERGING = 500
+_CORROBORATION_VALIDATED = 5000
+_HIDDEN_GEM_MAX_STARS = 100
+_HIDDEN_GEM_MIN_QUALITY = 0.5
 
 # --- Domain Profile ---
 
@@ -98,7 +106,7 @@ class ScoreResult(BaseModel):
     stars: int = Field(
         default=0,
         ge=0,
-        description="Star count at scoring time (for ValueScore computation)",
+        description="Star count at scoring time (metadata, not used in quality scoring)",
     )
 
     gate1_total: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -113,22 +121,50 @@ class ScoreResult(BaseModel):
         description="Scoring timestamp",
     )
 
+    # --- Star-neutral corroboration ---
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def corroboration_level(self) -> str:
+        """How many users have validated this repo's quality.
+
+        Stars tell you HOW MANY people validated quality, not WHAT the quality is.
+        This is informational metadata — it never changes the quality_score.
+        """
+        if self.stars == 0:
+            return "new"
+        if self.stars < _CORROBORATION_UNVALIDATED:
+            return "unvalidated"
+        if self.stars < _CORROBORATION_EMERGING:
+            return "emerging"
+        if self.stars < _CORROBORATION_VALIDATED:
+            return "validated"
+        return "widely_adopted"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_hidden_gem(self) -> bool:
+        """Whether this repo is a hidden gem (high quality, low visibility).
+
+        This is an INFORMATIONAL LABEL — it does not affect ranking.
+        Hidden gem = quality_score >= HIDDEN_GEM_MIN_QUALITY AND stars < HIDDEN_GEM_MAX_STARS.
+        """
+        return self.quality_score >= _HIDDEN_GEM_MIN_QUALITY and self.stars < _HIDDEN_GEM_MAX_STARS
+
+    # --- Backward-compatible value_score (now equals quality_score) ---
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def value_score(self) -> float:
-        """Anti-star bias Value Score.
+        """Star-neutral value score (equals quality_score).
 
-        Formula: quality_score / log10(stars + 10)
+        Previously: quality_score / log10(stars + 10) — penalized popular repos.
+        Now: simply equals quality_score — stars are metadata only.
 
-        Repos with high quality and low stars get high value scores.
-        Repos with high quality and high stars get moderate value scores.
-        This identifies hidden gems that star-based ranking misses.
-
-        Reference: Blueprint §5, §15 — anti-popularity debiasing.
+        Kept as computed_field for backward compatibility with existing
+        CLI output, MCP tools, and stored FeatureStore data.
         """
-        if self.quality_score <= 0.0:
-            return 0.0
-        return self.quality_score / log10(self.stars + 10)
+        return self.quality_score
 
 
 class RankedRepo(BaseModel):
@@ -174,7 +210,9 @@ class ExplainabilityReport(BaseModel):
     full_name: str = Field(description="Repository full name (owner/repo)")
     domain: DomainType = Field(description="Domain type")
     overall_quality: float = Field(ge=0.0, le=1.0, description="Overall quality score")
-    value_score: float = Field(ge=0.0, description="Anti-star bias value score")
+    value_score: float = Field(
+        ge=0.0, description="Star-neutral value score (equals quality_score)"
+    )
 
     dimension_breakdown: dict[str, dict[str, object]] = Field(
         default_factory=dict,

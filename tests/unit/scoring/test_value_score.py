@@ -1,8 +1,6 @@
-"""Tests for Value Score calculator."""
+"""Tests for star-neutral Value Score calculator."""
 
 from __future__ import annotations
-
-from math import log10
 
 import pytest
 
@@ -12,32 +10,32 @@ from github_discovery.scoring.value_score import ValueScoreCalculator
 
 
 class TestValueScoreCompute:
-    """Tests for the compute method."""
+    """Tests for the compute method (star-neutral: value_score = quality_score)."""
 
     def test_zero_stars(self, value_calculator) -> None:
-        """0 stars → denominator = log10(10) = 1.0."""
+        """0 stars → value_score = quality_score (star-neutral)."""
         vs = value_calculator.compute(0.8, 0)
         assert vs == pytest.approx(0.8, abs=0.001)
 
     def test_ten_stars(self, value_calculator) -> None:
-        """10 stars → denominator = log10(20) ≈ 1.30."""
+        """10 stars → value_score = quality_score (unchanged by stars)."""
         vs = value_calculator.compute(0.8, 10)
-        assert vs == pytest.approx(0.8 / log10(20), abs=0.001)
+        assert vs == pytest.approx(0.8, abs=0.001)
 
     def test_hundred_stars(self, value_calculator) -> None:
-        """100 stars → denominator ≈ 2.04."""
+        """100 stars → value_score = quality_score (unchanged by stars)."""
         vs = value_calculator.compute(0.8, 100)
-        assert vs == pytest.approx(0.8 / log10(110), abs=0.001)
+        assert vs == pytest.approx(0.8, abs=0.001)
 
     def test_thousand_stars(self, value_calculator) -> None:
-        """1000 stars → denominator ≈ 3.00."""
+        """1000 stars → value_score = quality_score (unchanged by stars)."""
         vs = value_calculator.compute(0.8, 1000)
-        assert vs == pytest.approx(0.8 / log10(1010), abs=0.001)
+        assert vs == pytest.approx(0.8, abs=0.001)
 
     def test_ten_thousand_stars(self, value_calculator) -> None:
-        """10000 stars → denominator ≈ 4.00."""
+        """10000 stars → value_score = quality_score (unchanged by stars)."""
         vs = value_calculator.compute(0.8, 10000)
-        assert vs == pytest.approx(0.8 / log10(10010), abs=0.001)
+        assert vs == pytest.approx(0.8, abs=0.001)
 
     def test_zero_quality_returns_zero(self, value_calculator) -> None:
         """Quality 0 → value score 0."""
@@ -45,20 +43,20 @@ class TestValueScoreCompute:
         assert vs == 0.0
 
     def test_higher_quality_higher_value(self, value_calculator) -> None:
-        """Same stars, higher quality → higher value score."""
+        """Higher quality → higher value score (stars irrelevant)."""
         vs_low = value_calculator.compute(0.5, 100)
         vs_high = value_calculator.compute(0.9, 100)
         assert vs_high > vs_low
 
-    def test_fewer_stars_higher_value(self, value_calculator) -> None:
-        """Same quality, fewer stars → higher value score."""
+    def test_stars_do_not_change_value(self, value_calculator) -> None:
+        """Star-neutral: same quality, different stars = same value score."""
         vs_popular = value_calculator.compute(0.8, 10000)
         vs_hidden = value_calculator.compute(0.8, 50)
-        assert vs_hidden > vs_popular
+        assert vs_popular == pytest.approx(vs_hidden, abs=0.001)
 
 
 class TestHiddenGem:
-    """Tests for is_hidden_gem."""
+    """Tests for is_hidden_gem (informational label, not score modifier)."""
 
     def test_hidden_gem_detected(self, value_calculator) -> None:
         """50 stars + quality 0.9 → hidden gem."""
@@ -90,7 +88,7 @@ class TestHiddenGem:
 
 
 class TestStarContext:
-    """Tests for star_context."""
+    """Tests for star_context (corroboration level descriptions)."""
 
     def test_zero_stars(self, value_calculator) -> None:
         ctx = value_calculator.star_context(0.8, 0, DomainType.LIBRARY)
@@ -110,7 +108,7 @@ class TestStarContext:
 
 
 class TestNormalizeBatch:
-    """Tests for normalize_batch."""
+    """Tests for normalize_batch (star-neutral: normalizes quality only)."""
 
     def test_empty_batch(self, value_calculator) -> None:
         result = value_calculator.normalize_batch([])
@@ -137,8 +135,8 @@ class TestNormalizeBatch:
         max_norm = max(vs for _, vs in result)
         assert max_norm == pytest.approx(1.0, abs=0.001)
 
-    def test_hidden_gem_ranks_above_popular(self, value_calculator) -> None:
-        """Anti-star bias: hidden gem should normalize above popular mediocre."""
+    def test_quality_determines_rank_regardless_of_stars(self, value_calculator) -> None:
+        """Star-neutral: higher quality ranks above lower quality, regardless of stars."""
         scores = [
             ("hidden/gem", 0.9, 50),
             ("popular/mediocre", 0.5, 5000),

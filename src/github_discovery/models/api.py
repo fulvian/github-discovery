@@ -189,7 +189,7 @@ class RankingQuery(BaseModel):
     min_value_score: float = Field(
         default=0.0,
         ge=0.0,
-        description="Minimum value score (anti-star bias)",
+        description="Minimum quality score threshold",
     )
     max_results: int = Field(
         default=20,

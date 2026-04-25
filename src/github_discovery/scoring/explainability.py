@@ -4,8 +4,11 @@ Every score must be explainable per feature and dimension (Blueprint §3).
 Reports provide both human-readable explanations and machine-readable
 feature breakdowns for transparency.
 
+Stars are metadata (corroboration level), not a scoring signal.
+Hidden gem is an informational label, not a score modifier.
+
 Two detail levels:
-- "summary": top strengths, weaknesses, hidden gem indicator, star context
+- "summary": top strengths, weaknesses, hidden gem indicator, corroboration
 - "full": complete dimension breakdown, all evidence, recommendations
 """
 
@@ -282,22 +285,29 @@ class ExplainabilityGenerator:
         score_result: ScoreResult,
         profile: DomainProfile,
     ) -> str:
-        """Compare repo to domain star baseline."""
+        """Describe corroboration level relative to domain baseline.
+
+        Stars indicate how many users have validated quality.
+        This is informational — it never changes the quality_score.
+        """
         if score_result.stars == 0:
-            return "No stars — cannot compare to domain baseline"
+            return "No stars — quality based purely on technical assessment"
         if score_result.stars < profile.star_baseline * 0.1:
             return (
-                f"Significantly below domain baseline "
-                f"({profile.star_baseline:.0f} stars) — potential hidden gem"
+                f"Corroboration: low ({score_result.stars} stars vs "
+                f"{profile.star_baseline:.0f} domain baseline). "
+                f"Quality score is the primary signal."
             )
         if score_result.stars < profile.star_baseline:
             return (
-                f"Below domain baseline ({profile.star_baseline:.0f} stars) "
-                f"for {profile.display_name} domain"
+                f"Corroboration: emerging ({score_result.stars} stars vs "
+                f"{profile.star_baseline:.0f} domain baseline). "
+                f"Community interest aligns with quality assessment."
             )
         return (
-            f"Above domain baseline ({profile.star_baseline:.0f} stars) "
-            f"for {profile.display_name} domain"
+            f"Corroboration: strong ({score_result.stars:,} stars vs "
+            f"{profile.star_baseline:.0f} domain baseline). "
+            f"Broad community adoption validates the quality score."
         )
 
     def _build_default_infos(

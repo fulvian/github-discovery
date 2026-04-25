@@ -1,14 +1,19 @@
-"""Anti-star bias Value Score calculation.
+"""Star-neutral value score and hidden gem detection.
 
-Formula: ValueScore = quality_score / log10(star_count + 10)
+Design principle: Stars tell you HOW MANY people validated quality,
+not WHAT the quality is. Stars are metadata, not a scoring signal.
 
-This identifies hidden gems: repos with high quality but low visibility.
-Reference: Blueprint §5, §15 — anti-popularity debiasing.
+This module provides:
+- Hidden gem detection: informational label (high quality + low stars)
+- Star context strings: human-readable corroboration level
+- Batch normalization: for optional cross-domain comparison
+
+Stars are NEVER used to penalize or boost the quality_score.
+The quality_score is a pure technical assessment from Gate 1+2+3.
 """
 
 from __future__ import annotations
 
-from math import log10
 from typing import TYPE_CHECKING
 
 import structlog
@@ -25,16 +30,17 @@ _HIGH_STAR_THRESHOLD = 5000
 
 
 class ValueScoreCalculator:
-    """Anti-star bias Value Score calculation.
+    """Star-neutral value score and hidden gem detection.
 
-    The value score highlights repos where quality exceeds
-    popularity: high quality_score + low stars = high value_score.
+    Stars are corroboration metadata, not a scoring signal:
+    - 0 stars → "new/unknown" — quality assessment especially valuable
+    - <50 stars → "unvalidated" — few users have checked
+    - <500 stars → "emerging" — some validation
+    - <5000 stars → "validated" — many users confirm quality
+    - 5000+ stars → "widely adopted" — broad community validation
 
-    This is the core anti-star-bias mechanism (Blueprint §15):
-    stars are context only, never a primary ranking signal.
+    None of these levels change the quality_score. They are informational only.
     """
-
-    _STAR_OFFSET = 10
 
     def __init__(self, settings: ScoringSettings | None = None) -> None:
         """Initialize ValueScoreCalculator with optional scoring settings."""
@@ -43,18 +49,20 @@ class ValueScoreCalculator:
         self._hidden_gem_min_quality = self._settings.hidden_gem_min_quality
 
     def compute(self, quality_score: float, stars: int) -> float:
-        """Compute Value Score with edge-case handling.
+        """Compute value score — star-neutral (equals quality_score).
+
+        This is kept for backward compatibility. The value_score now
+        simply equals the quality_score. Stars are not considered.
 
         Args:
             quality_score: Domain-weighted composite (0.0-1.0).
-            stars: Star count at scoring time.
+            stars: Star count at scoring time (ignored).
 
         Returns:
-            Value score (0.0+). Higher = more undervalued.
+            quality_score unchanged (star-neutral).
         """
-        if quality_score <= 0.0:
-            return 0.0
-        return quality_score / log10(stars + self._STAR_OFFSET)
+        _ = stars  # explicitly unused — star-neutral design
+        return max(quality_score, 0.0)
 
     def is_hidden_gem(
         self,
@@ -64,19 +72,23 @@ class ValueScoreCalculator:
     ) -> tuple[bool, str]:
         """Determine if repo qualifies as a hidden gem.
 
-        Hidden gem criteria:
+        Hidden gem is an INFORMATIONAL LABEL, not a score modifier.
+        It flags repos where quality exceeds visibility.
+
+        Criteria:
         - stars < hidden_gem_star_threshold
         - quality_score >= hidden_gem_min_quality
-        - value_score is meaningful (> 0)
 
         Args:
             quality_score: Domain-weighted quality.
             stars: Star count.
-            value_score: Computed value score.
+            value_score: Computed value score (unused, kept for API compat).
 
         Returns:
             Tuple of (is_gem, reason).
         """
+        _ = value_score  # unused in star-neutral design
+
         if quality_score < self._hidden_gem_min_quality:
             return (
                 False,
@@ -87,8 +99,6 @@ class ValueScoreCalculator:
                 False,
                 f"Stars ({stars}) at or above threshold ({self._hidden_gem_star_threshold})",
             )
-        if value_score <= 0.0:
-            return (False, "Value score is zero or negative")
 
         return (
             True,
@@ -96,7 +106,7 @@ class ValueScoreCalculator:
         )
 
     def star_context(self, quality_score: float, stars: int, domain: DomainType) -> str:
-        """Generate human-readable star context string.
+        """Generate human-readable corroboration context string.
 
         Args:
             quality_score: Quality score of the repo.
@@ -104,46 +114,52 @@ class ValueScoreCalculator:
             domain: Domain type for context.
 
         Returns:
-            Human-readable context string.
+            Human-readable context string describing corroboration level.
         """
         if stars == 0:
-            return "0 stars — new/unknown, quality assessment valuable"
+            return "0 stars — new/unknown, quality assessment is the primary signal"
         if stars < _VERY_LOW_STAR_THRESHOLD:
-            return f"{stars} stars — very low visibility for this quality level"
+            return f"{stars} stars — unvalidated: few users have tested this"
         if stars < self._hidden_gem_star_threshold:
             return (
-                f"{stars} stars — low to moderate visibility. "
-                f"Quality suggests it deserves wider adoption."
+                f"{stars} stars — emerging community interest. "
+                f"Quality assessment complements limited user validation."
             )
         if stars < _HIGH_STAR_THRESHOLD:
-            return f"{stars:,} stars — moderate visibility. Quality consistent with adoption."
-        return f"{stars:,} stars — high visibility. Quality should be proportionally assessed."
+            return (
+                f"{stars:,} stars — validated by moderate community. "
+                f"Quality score is corroborated by user adoption."
+            )
+        return (
+            f"{stars:,} stars — widely adopted. "
+            f"Quality score is strongly corroborated by broad usage."
+        )
 
     def normalize_batch(
         self,
         scores: list[tuple[str, float, int]],
     ) -> list[tuple[str, float]]:
-        """Normalize value scores across a batch to 0.0-1.0 range.
+        """Normalize quality scores across a batch to 0.0-1.0 range.
 
-        Useful for cross-domain comparison where absolute value_score
-        may vary significantly between domains.
+        Note: Stars are NOT used in normalization. This is purely
+        quality-based normalization for cross-domain comparison.
 
         Args:
             scores: List of (full_name, quality_score, stars).
+                Stars are accepted for API compatibility but unused.
 
         Returns:
-            List of (full_name, normalized_value_score) in [0.0, 1.0].
+            List of (full_name, normalized_quality_score) in [0.0, 1.0].
         """
         if not scores:
             return []
 
         computed: list[tuple[str, float]] = []
-        for full_name, quality, stars in scores:
-            vs = self.compute(quality, stars)
-            computed.append((full_name, vs))
+        for full_name, quality, _stars in scores:
+            computed.append((full_name, max(quality, 0.0)))
 
-        max_vs = max(vs for _, vs in computed)
-        if max_vs <= 0.0:
+        max_q = max(q for _, q in computed)
+        if max_q <= 0.0:
             return [(name, 0.0) for name, _ in computed]
 
-        return [(name, vs / max_vs) for name, vs in computed]
+        return [(name, q / max_q) for name, q in computed]

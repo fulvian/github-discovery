@@ -114,11 +114,11 @@ async def _compare(
                 },
             )
 
-        # Determine winner (highest value_score)
+        # Determine winner (highest quality_score — star-neutral)
         valid = [c for c in comparisons if "error" not in c]
         winner = ""
         if valid:
-            best = max(valid, key=lambda c: float(c.get("value_score", 0)))  # type: ignore[arg-type]
+            best = max(valid, key=lambda c: float(c.get("quality_score", 0)))  # type: ignore[arg-type]
             winner = str(best.get("repo", ""))
 
         formatted = format_output(

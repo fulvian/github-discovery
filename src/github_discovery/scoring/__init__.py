@@ -4,8 +4,8 @@ Provides scoring, ranking, and explainability for repository quality assessment.
 
 Key components:
 - ScoringEngine: Multi-dimensional scoring combining Gate 1+2+3 results
-- Ranker: Intra-domain ranking with anti-star bias
-- ValueScoreCalculator: Anti-star bias value score formula
+- Ranker: Intra-domain ranking (star-neutral: quality first, stars as metadata)
+- ValueScoreCalculator: Star-neutral value score (quality_score unchanged by stars)
 - ConfidenceCalculator: Confidence scoring based on data completeness
 - ProfileRegistry: Domain-specific weight profiles
 - CrossDomainGuard: Cross-domain comparison with warnings

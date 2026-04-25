@@ -1,8 +1,8 @@
 """MCP ranking tools — rank_repos, explain_repo, compare_repos.
 
 Tools for Layer D: scoring, ranking, and explainability.
-Anti-star bias: stars are context only, never primary ranking signal.
-Value Score = quality_score / log10(stars + 10) identifies hidden gems.
+Star-neutral: stars are metadata (corroboration level), never a ranking signal.
+Value Score = quality_score (unchanged by stars). Hidden gem = informational label.
 """
 
 from __future__ import annotations
@@ -53,11 +53,11 @@ def register_ranking_tools(mcp: FastMCP, settings: Settings) -> None:
             session_id: str | None = None,
             ctx: Context[ServerSession, AppContext] | None = None,
         ) -> dict[str, object]:
-            """Rank repositories by anti-star bias value score.
+            """Rank repositories by star-neutral quality score.
 
-            Ranks repos within a domain by value_score descending.
-            Value Score = quality_score / log10(stars + 10) identifies
-            hidden gems: high quality, low visibility.
+            Ranks repos within a domain by quality_score descending.
+            Stars are metadata (corroboration level), not a ranking signal.
+            Hidden gem = informational label (high quality + low stars).
 
             Args:
                 domain: Domain type for intra-domain ranking (default: "other")

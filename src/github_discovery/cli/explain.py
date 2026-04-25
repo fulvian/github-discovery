@@ -105,6 +105,7 @@ async def _explain(
             "value_score": round(report.value_score, 3),
             "confidence": round(report.confidence, 3),
             "stars": score_result.stars,
+            "corroboration_level": score_result.corroboration_level,
             "hidden_gem": report.hidden_gem_indicator,
             "hidden_gem_reason": report.hidden_gem_reason,
             "star_context": report.star_context,

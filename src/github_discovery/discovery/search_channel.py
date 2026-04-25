@@ -81,7 +81,7 @@ class SearchChannel:
         # Public repos only
         parts.append("is:public")
 
-        # Exclude mega-popular repos (anti-star bias)
+        # Exclude mega-popular repos (reduce noise, not bias — quality is evaluated independently)
         parts.append(f"-stars:>{_MEGA_POPULAR_STAR_THRESHOLD}")
 
         return " ".join(parts)
