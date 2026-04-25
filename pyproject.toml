@@ -110,6 +110,7 @@ ignore = [
 "src/github_discovery/mcp/tools/session.py" = ["PLC0415", "S101", "TCH"]  # MCP tool registration; runtime type introspection
 "src/github_discovery/cli/rank.py" = ["PLR0912", "PLR0915"]  # CLI orchestration: multi-branch dispatch logic
 "src/github_discovery/cli/screen.py" = ["PLR0915"]  # CLI orchestration: screening + scoring pipeline
+"src/github_discovery/cli/progress_display.py" = ["PLR0912", "PLR0915"]  # CLI orchestration: multi-branch progress display
 
 [tool.ruff.lint.isort]
 required-imports = ["from __future__ import annotations"]

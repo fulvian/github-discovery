@@ -240,16 +240,22 @@ async def _rank_from_pool(
 
         results = []
         for candidate in pool.candidates:
-            # Check if already scored in FeatureStore
+            # Check if already scored in FeatureStore (by commit_sha)
             if candidate.commit_sha:
                 cached = await store.get(candidate.full_name, candidate.commit_sha)
                 if cached is not None:
                     results.append(cached)
                     continue
 
-            # Try to reconstruct screening from FeatureStore gate scores
-            screening: ScreeningResult | None = None
+            # Try to get latest score (may include Gate 3 data from deep-eval)
             latest_score = await store.get_latest(candidate.full_name)
+            if latest_score is not None and latest_score.gate3_available:
+                # Gate 3 data already incorporated — use cached result directly
+                results.append(latest_score)
+                continue
+
+            # Reconstruct screening from FeatureStore gate scores
+            screening: ScreeningResult | None = None
             if latest_score is not None:
                 gate1_pass = latest_score.gate1_total >= real_settings.screening.min_gate1_score
                 gate2_pass = latest_score.gate2_total >= real_settings.screening.min_gate2_score

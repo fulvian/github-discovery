@@ -179,23 +179,41 @@ async def _run_assessments(
     candidates: list[RepoCandidate],
     screening_lookup: dict[str, ScreeningResult],
     real_settings: Settings,
+    store: FeatureStore,
 ) -> list[dict[str, object]]:
-    """Run deep assessment on each candidate with screening gate enforcement."""
+    """Run deep assessment on each candidate with screening gate enforcement.
+
+    After each assessment, re-scores the candidate via ScoringEngine with the
+    Gate 3 result and persists the updated ScoreResult to FeatureStore. This
+    ensures subsequent ``rank`` and ``explain`` commands use Gate 3 data.
+    """
     from github_discovery.assessment.orchestrator import AssessmentOrchestrator
+    from github_discovery.scoring.engine import ScoringEngine
 
     orch = AssessmentOrchestrator(real_settings)
+    scoring_engine = ScoringEngine(settings=real_settings.scoring, store=store)
     display_results: list[dict[str, object]] = []
 
     for candidate in candidates:
         screening = screening_lookup.get(candidate.full_name)
         try:
             result = await orch.quick_assess(candidate, screening=screening)
+
+            # Re-score with Gate 3 assessment and persist to FeatureStore
+            score_result = scoring_engine.score(
+                candidate=candidate,
+                screening=screening,
+                assessment=result,
+            )
+            await store.put(score_result)
+
             display_results.append(
                 {
                     "full_name": result.full_name,
                     "overall_score": result.overall_quality,
                     "confidence": result.overall_confidence,
                     "passed": result.gate3_pass,
+                    "gate3_persisted": True,
                     "dimension_scores": [
                         {"dimension": ds.dimension.value, "score": ds.value}
                         for ds in result.dimensions.values()
@@ -209,6 +227,7 @@ async def _run_assessments(
                     "full_name": candidate.full_name,
                     "error": str(e),
                     "passed": False,
+                    "gate3_persisted": False,
                 }
             )
 
@@ -256,6 +275,7 @@ async def _deep_eval(
             candidates,
             screening_lookup,
             real_settings,
+            store,
         )
 
         formatted = format_output(
