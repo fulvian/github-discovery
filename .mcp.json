@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer ${GITHUB_TOKEN}",
+        "X-MCP-Toolsets": "repos,issues,pull_requests,context",
+        "X-MCP-Readonly": "true"
+      }
+    },
+    "github-discovery": {
+      "command": "python",
+      "args": ["-m", "github_discovery.mcp", "serve", "--transport", "stdio"],
+      "env": {
+        "GHDISC_GITHUB_TOKEN": "${GITHUB_TOKEN}",
+        "GHDISC_SESSION_BACKEND": "sqlite"
+      }
+    }
+  }
+}

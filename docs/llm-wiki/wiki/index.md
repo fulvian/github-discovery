@@ -9,12 +9,14 @@
 - [MCP-Native Agentic Integration Architecture](architecture/mcp-native-design.md) — MCP-first design principles, progressive deepening, session-aware tools, agent workflows | Updated: 2026-04-22
 - [Star-Neutral Quality Scoring](architecture/anti-star-bias.md) — Star-neutral design: value_score = quality_score, corroboration levels, hidden gem as informational label, quality-first ranking | Updated: 2026-04-25
 - [Option C Hybrid Architecture Decision](architecture/option-c-hybrid.md) — Architecture decision: API+Worker+MCP native+CLI hybrid, now evolved to MCP-native | Updated: 2026-04-22
+- [Architecture Analysis — Complete System Overview](architecture/architecture-analysis.md) — Comprehensive architecture analysis (v0.1.0-alpha): 4-gate pipeline detail, star-neutral scoring, 107-file codebase structure, 1326 tests, data flow, database architecture, error patterns | Updated: 2026-04-25
 
 ## APIs
 
 - [MCP Tool Specifications](apis/mcp-tools.md) — Complete specification of all MCP tools: discovery, screening, assessment, ranking, session management | Updated: 2026-04-22
 - [MCP Python SDK Verification](apis/mcp-sdk-verification.md) — Context7-verified MCP Python SDK API patterns: FastMCP, tools, resources, Context, progress notifications, transports | Updated: 2026-04-22
 - [GitHub API Patterns and Constraints](apis/github-api-patterns.md) — REST/GraphQL API usage patterns, rate limits with exponential backoff retry, pagination, MCP composition | Updated: 2026-04-25
+- [Agenti di Coding — Integrazione MCP](apis/agent-integration.md) — Complete MCP integration guide for Claude Code, Kilocode CLI/Kilo Code, and OpenCode: Context7+Brave verified config formats, .mcp.json and .kilo/mcp.json files, env var syntax differences, platform comparison table, best practices | Updated: 2026-04-26
 
 ## Domain
 

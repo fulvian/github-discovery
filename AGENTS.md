@@ -12,7 +12,9 @@ discovery → lightweight screening → deep LLM assessment → explainable rank
 Designed for deep integration into Kilocode CLI, OpenCode/OpenClaude, and Claude Code agent workflows.
 See `docs/foundation/github-discovery_foundation_blueprint.md` §21 for full agentic integration architecture.
 
-**Current phase:** Early planning. No source code yet. Foundation blueprint is complete (including §21 Agentic Integration Architecture).
+**Current phase:** v0.1.0-alpha — All 10 phases complete. 118+ source files, 1326 tests passing, 0 lint/type errors.
+MCP server fully functional (16 tools, 4 resources, 5 prompts) — ready for local installation in Kilocode CLI, Kilo Code, and Claude Code.
+See `docs/llm-wiki/wiki/` for compiled project knowledge.
 
 ---
 

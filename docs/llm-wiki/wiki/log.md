@@ -553,6 +553,14 @@
 - Created test_report_1.md with full E2E analysis
 - Updated README.md to reflect star-neutral architecture and current project state
 
+## [2026-04-25] ingest | Architecture Analysis — Complete System Overview
+- Created docs/analysis/architecture_analysis.md — comprehensive architecture report in Italian (11 sections, ~650 lines)
+- Created wiki/architecture/architecture-analysis.md — synthesized architecture analysis with 4-gate pipeline detail, star-neutral scoring, 107-file codebase structure, data flow, database architecture, error patterns
+- Created wiki/apis/agent-integration.md — complete MCP integration guide for Claude Code, Kilocode CLI/Kilo Code, OpenCode: configuration formats, env var syntax, OAuth, marketplace deployment options
+- Research sources: 3 parallel task agents explored codebase (107 files), MCP platform docs (Kilocode, Claude Code, OpenCode), and 12 existing wiki articles
+- External research: Kilo MCP docs, Claude Code MCP docs, OpenCode MCP docs, Kilo Marketplace repo, GitHub MCP Server repo, MCP protocol spec, modelcontextprotocol.io
+- Updated wiki/index.md with 2 new articles: architecture-analysis + agent-integration
+
 ## [2026-04-25] ingest | GitHub API Rate Limit Fix — Exponential Backoff with Retry
 
 ### Bug: Score 0.0 caused by rate limit fail-fast
@@ -595,3 +603,48 @@ This was NOT a real evaluation — it was a silent failure from not respecting G
 - `01a2987` — fix: exclude phantom 0.5 defaults from composite quality score
 - `e75e8f4` — docs: update README, LLM wiki, and E2E test report for star-neutral system
 - `083db41` — fix: add exponential backoff with retry to GitHub API client
+
+## [2026-04-26] ingest | MCP Installation Readiness — Config Files Created + AGENTS.md Fixed
+
+### Azioni correttive (3)
+
+1. **Creato `.mcp.json`** (Claude Code) — mancava il file di configurazione MCP per Claude Code alla radice del progetto.
+   - Formato: `"mcpServers"` top-level, `"command"` string + `"args"` array, `"env"` key, `"${VAR}"` expansion
+   - Composizione: github (http, GitHub Copilot MCP) + github-discovery (stdio, server locale)
+   - Contest7-verified: `/websites/code_claude` + `/ericbuess/claude-code-docs` per schema McpStdioServerConfig
+
+2. **Aggiornato `.kilo/mcp.json`** (Kilocode CLI) — file conteneva solo github-discovery, mancava il server github remoto.
+   - Aggiunto server `github` (remote, GitHub Copilot MCP) con headers X-MCP-Toolsets + X-MCP-Readonly
+   - Formato: `"mcp"` top-level, `"command"` array, `"environment"` key, `"{env:VAR}"` expansion
+   - Brave-verified: kilo.ai/docs per formato corretto
+
+3. **Aggiornato `AGENTS.md`** header — dichiarava "Early planning. No source code yet" ma il progetto ha 118+ file, 1326 test, tutte le 10 fasi complete.
+   - Nuovo testo: "v0.1.0-alpha — All 10 phases complete. 118+ source files, 1326 tests passing, 0 lint/type errors."
+
+### Context7 Verification
+
+- `/modelcontextprotocol/python-sdk`: FastMCP, json_response, stateless_http, streamable-http, lifespan — tutto conforme
+- `/websites/code_claude`: McpStdioServerConfig type, .mcp.json format, `claude mcp add-json` command, `${VAR}` expansion
+- `/ericbuess/claude-code-docs`: managed-mcp.json enterprise control, HTTP server with headers
+- MCP SDK versione installata: 1.27.0 (requirement: >=1.6)
+
+### Brave Web Search Verification
+
+- kilo.ai/docs/automate/mcp/using-in-cli: formato `"mcp"` → `"type": "local"` → `"command": [...]` → `"environment": {...}`
+- kilo.ai/docs/features/mcp/using-mcp-in-kilo-code: `.kilocode/mcp.json` per progetto, `kilo.jsonc` per globale
+
+### Differenze chiave tra piattaforme documentate
+
+| Aspetto | Kilocode | Claude Code |
+|---------|----------|-------------|
+| Top-level key | `"mcp"` | `"mcpServers"` |
+| Command | Array `["cmd","arg"]` | String `"cmd"` + `"args": [...]` |
+| Env key | `"environment"` | `"env"` |
+| Env expansion | `{env:VAR}` | `${VAR}` |
+| Remote type | `"remote"` | `"http"` |
+
+### Wiki Updates
+
+- Updated wiki/apis/agent-integration.md: Added Context7-verified config formats, .mcp.json status table, best practices section, platform differences section
+- Updated wiki/index.md: Refreshed agent-integration.md entry
+- Updated wiki/log.md: This entry
