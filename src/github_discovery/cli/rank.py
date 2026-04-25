@@ -229,7 +229,15 @@ async def _rank_from_pool(
             exit_with_error(f"Pool {pool_id} has no candidates.")
             return  # unreachable
 
-        # Score each candidate (screening=None → uses discovery metadata only)
+        # Score each candidate — prefer cached FeatureStore results,
+        # then try reconstructing screening from FeatureStore gate scores,
+        # finally fall back to discovery-metadata-only scoring.
+        from github_discovery.models.screening import (
+            MetadataScreenResult,
+            ScreeningResult,
+            StaticScreenResult,
+        )
+
         results = []
         for candidate in pool.candidates:
             # Check if already scored in FeatureStore
@@ -239,9 +247,32 @@ async def _rank_from_pool(
                     results.append(cached)
                     continue
 
+            # Try to reconstruct screening from FeatureStore gate scores
+            screening: ScreeningResult | None = None
+            latest_score = await store.get_latest(candidate.full_name)
+            if latest_score is not None:
+                gate1_pass = latest_score.gate1_total >= real_settings.screening.min_gate1_score
+                gate2_pass = latest_score.gate2_total >= real_settings.screening.min_gate2_score
+                screening = ScreeningResult(
+                    full_name=candidate.full_name,
+                    commit_sha=latest_score.commit_sha,
+                    gate1=MetadataScreenResult(
+                        full_name=candidate.full_name,
+                        gate1_total=latest_score.gate1_total,
+                        gate1_pass=gate1_pass,
+                        threshold_used=real_settings.screening.min_gate1_score,
+                    ),
+                    gate2=StaticScreenResult(
+                        full_name=candidate.full_name,
+                        gate2_total=latest_score.gate2_total,
+                        gate2_pass=gate2_pass,
+                        threshold_used=real_settings.screening.min_gate2_score,
+                    ),
+                )
+
             score_result = scoring_engine.score(
                 candidate=candidate,
-                screening=None,
+                screening=screening,
                 assessment=None,
             )
             await store.put(score_result)

@@ -269,7 +269,7 @@ class TestLastTokenUsage:
         assert usage.total_tokens == 150
 
     async def test_none_when_no_usage_in_response(self) -> None:
-        """last_token_usage stays None when response has no usage info."""
+        """last_token_usage is estimated from content when response has no usage info."""
         provider = _make_provider()
 
         # Response without usage info — use a proper LLMDimensionOutput
@@ -284,7 +284,10 @@ class TestLastTokenUsage:
             "content",
         )
 
-        assert provider.last_token_usage is None
+        # When API doesn't return usage, we estimate from content length
+        assert provider.last_token_usage is not None
+        assert provider.last_token_usage.completion_tokens > 0
+        assert provider.last_token_usage.prompt_tokens == 0  # Unknown without API data
 
 
 class TestUpdateTokenUsage:
@@ -310,14 +313,16 @@ class TestUpdateTokenUsage:
         assert provider.last_token_usage.provider == "nanogpt"
 
     def test_handles_missing_raw_response(self) -> None:
-        """_update_token_usage handles response without raw_response."""
+        """_update_token_usage estimates tokens when response has no raw_response."""
         provider = _make_provider()
 
         # Response without raw_response attribute — falls back to response itself
         response = SimpleNamespace(usage=None)
         provider._update_token_usage(response)
 
-        assert provider.last_token_usage is None
+        # Should estimate tokens from content rather than staying None
+        assert provider.last_token_usage is not None
+        assert provider.last_token_usage.completion_tokens >= 1
 
     def test_handles_none_usage_attributes(self) -> None:
         """_update_token_usage treats None attributes as 0."""

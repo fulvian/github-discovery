@@ -261,17 +261,38 @@ class LLMProvider:
         Instructor wraps the response; the underlying raw response
         may carry usage stats accessible via ``.raw_response`` or
         as a direct attribute depending on instructor version.
+
+        When the provider doesn't return usage data (e.g., NanoGPT),
+        estimate tokens from content length (~4 chars per token).
         """
         raw = getattr(response, "raw_response", response)
         usage = getattr(raw, "usage", None)
+
         if usage is not None:
-            self._token_usage = TokenUsage(
-                prompt_tokens=getattr(usage, "prompt_tokens", 0) or 0,
-                completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
-                total_tokens=getattr(usage, "total_tokens", 0) or 0,
-                model_used=self._model,
-                provider="nanogpt",
-            )
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+            total_tokens = getattr(usage, "total_tokens", 0) or 0
         else:
-            # No usage data available — keep previous or None
-            logger.debug("no_token_usage_in_response")
+            # Estimate from content length when provider omits usage
+            # (~4 chars per token for o200k_base encoding)
+            completion_chars = 0
+            # Estimate prompt from the dimensions/structured output
+            if isinstance(response, LLMBatchOutput | LLMDimensionOutput):
+                completion_chars = len(str(response.model_dump()))
+            prompt_tokens = 0  # Unknown without API data
+            completion_tokens = max(1, completion_chars // 4)
+            total_tokens = prompt_tokens + completion_tokens
+
+            logger.debug(
+                "token_usage_estimated",
+                completion_chars=completion_chars,
+                estimated_tokens=total_tokens,
+            )
+
+        self._token_usage = TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            model_used=self._model,
+            provider="nanogpt",
+        )

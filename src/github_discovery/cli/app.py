@@ -83,10 +83,17 @@ def main_callback(
     cli_state.log_level = log_level
     cli_state.no_color = no_color
 
-    if log_level != "INFO":
-        logging.getLogger("github_discovery").setLevel(
-            getattr(logging, log_level.upper()),
-        )
+    # Effective log level: WARNING by default (quiet CLI), DEBUG with --verbose,
+    # or whatever the user explicitly sets with --log-level.
+    effective_level = log_level
+    if log_level == "INFO" and not verbose:
+        effective_level = "WARNING"
+    elif verbose and log_level == "INFO":
+        effective_level = "DEBUG"
+
+    logging.getLogger("github_discovery").setLevel(
+        getattr(logging, effective_level.upper(), logging.WARNING),
+    )
 
 
 @app.command()
@@ -102,8 +109,10 @@ app.add_typer(session_app, name="session")
 
 def _register_commands() -> None:
     """Register all CLI commands via lazy imports."""
+    from github_discovery.cli.compare import register as reg_compare
     from github_discovery.cli.deep_eval import register as reg_deep_eval
     from github_discovery.cli.discover import register as reg_discover
+    from github_discovery.cli.explain import register as reg_explain
     from github_discovery.cli.export import register as reg_export
     from github_discovery.cli.mcp_config import register as reg_mcp_config
     from github_discovery.cli.mcp_serve import register as reg_mcp_serve
@@ -115,6 +124,8 @@ def _register_commands() -> None:
     reg_screen(app)
     reg_deep_eval(app)
     reg_rank(app)
+    reg_explain(app)
+    reg_compare(app)
     reg_export(app)
     reg_session(session_app)
     reg_mcp_serve(mcp_app)
