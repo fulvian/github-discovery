@@ -523,3 +523,32 @@
 - Updated wiki/patterns/phase10-alpha-analysis.md with smoke test results
 - Updated wiki/index.md with new article
 - 1316 tests, ruff + mypy --strict green
+
+## [2026-04-25] ingest | Star-Neutral Scoring Redesign
+- Redesigned scoring from anti-star bias to star-neutral across 18 files
+- Anti-star bias formula `quality_score / log10(stars + 10)` replaced with `value_score = quality_score`
+- New computed fields: `corroboration_level` (5 buckets), `is_hidden_gem` (informational label)
+- Ranking sort key: `(-quality_score, -confidence, ...)` — stars excluded
+- All "anti-star bias" references updated to "star-neutral" across codebase
+- CLI output updated: rank shows corroboration_level, explain shows corroboration, compare uses quality_score
+- Bug fix: star count preservation in deep_eval.py during Gate 3 re-scoring
+- 1326 tests passing, ruff clean, mypy --strict clean (137 files)
+- Commits: 201b612 (star-neutral redesign), cab5c6f (star preservation fix)
+- Updated wiki articles:
+  - architecture/anti-star-bias.md → renamed to "Star-Neutral Quality Scoring" with full redesign documentation
+  - domain/scoring-dimensions.md → updated with corroboration levels, hidden gem label, star-neutral value score
+  - patterns/phase5-scoring-implementation.md → added star-neutral redesign section, constants, bug fix
+  - index.md → updated all article descriptions to reflect star-neutral design
+
+## [2026-04-25] ingest | Real E2E Validation with Star-Neutral System
+- Ran full E2E pipeline: discover "mcp office" → screen (Gate 1+2) → deep-eval (Gate 3) → rank
+- 20 repos discovered via GitHub Search + Registry channels
+- 6 repos passed Gate 1+2 screening
+- 3 repos assessed with Gate 3 deep assessment:
+  - PsychQuant/che-word-mcp: quality=0.703, stars=0, hidden gem 💎
+  - modelcontextprotocol/typescript-sdk: quality=0.672, stars=12281, widely_adopted
+  - walksoda/crawl-mcp: quality=0.653, stars=0, hidden gem 💎
+- Star-neutral ranking validated: hidden gems rank by quality, popular repos not penalized
+- LLM assessment used NanoGPT provider with heuristic fallback for large repos
+- Created test_report_1.md with full E2E analysis
+- Updated README.md to reflect star-neutral architecture and current project state
