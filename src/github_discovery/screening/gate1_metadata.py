@@ -93,8 +93,9 @@ class Gate1MetadataScreener:
                     logger.warning("gate1_context_fetch_failed", url=url)
                     return {}
 
-        # Parallel context gathering (6 API calls)
-        contents_raw, releases, commits, issues, prs, languages = await asyncio.gather(
+        # Parallel context gathering (7 API calls — includes repo metadata for star enrichment)
+        repo_meta, contents_raw, releases, commits, issues, prs, languages = await asyncio.gather(
+            _fetch(f"{api_base}"),
             _fetch(f"{api_base}/contents"),
             _fetch(f"{api_base}/releases", params={"per_page": 10}),
             _fetch(f"{api_base}/commits", params={"per_page": 30}),
@@ -102,6 +103,12 @@ class Gate1MetadataScreener:
             _fetch(f"{api_base}/pulls", params={"per_page": 30, "state": "all"}),
             _fetch(f"{api_base}/languages"),
         )
+
+        # Enrich candidate with stars from GitHub API if not already set
+        if isinstance(repo_meta, dict) and candidate.stars == 0:
+            stars = repo_meta.get("stargazers_count", 0)
+            if stars:
+                candidate.stars = stars
 
         # Extract filenames from contents listing
         repo_contents: list[str] = []
