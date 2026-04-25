@@ -116,11 +116,13 @@ async def mcp_client(
     server and session lifecycle, avoiding anyio cancel scope issues that
     arise with pytest-asyncio's fixture teardown mechanism.
     """
-    # Ensure .ghdisc/ dir exists for SQLite databases used by lifespan
+    # Ensure data dir exists for SQLite databases used by lifespan
     ghdisc_dir = tmp_path / ".ghdisc"
     ghdisc_dir.mkdir()
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GHDISC_GITHUB_TOKEN", "ghp_test_agentic")
+    # Point MCP server to tmp data dir (not ~/.local/share/)
+    monkeypatch.setenv("GHDISC_DATA_DIR", str(ghdisc_dir))
 
     settings = Settings(
         github=GitHubSettings(token="ghp_test_agentic"),  # noqa: S106

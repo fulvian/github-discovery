@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -35,6 +36,27 @@ if TYPE_CHECKING:
     from github_discovery.screening.orchestrator import ScreeningOrchestrator
 
 logger = structlog.get_logger("github_discovery.mcp.server")
+
+
+def _resolve_data_dir() -> Path:
+    """Resolve the data directory for DB files.
+
+    Uses GHDISC_DATA_DIR env var if set, otherwise falls back to
+    ~/.local/share/github-discovery/ (XDG standard). This ensures
+    the MCP server works regardless of the CWD when spawned by
+    Kilocode or Claude Code.
+    """
+    import os
+
+    env_dir = os.environ.get("GHDISC_DATA_DIR")
+    if env_dir:
+        data_dir = Path(env_dir)
+    else:
+        xdg_data = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
+        data_dir = Path(xdg_data) / "github-discovery"
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
 
 
 @dataclass
@@ -84,12 +106,17 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     settings = Settings()
     logger.info("mcp_server_starting", transport=settings.mcp.transport)
 
+    # Resolve data directory (CWD-independent for MCP server usability)
+    data_dir = _resolve_data_dir()
+    logger.info("data_directory_resolved", path=str(data_dir))
+
     # Initialize session manager
-    session_manager = SessionManager(settings.mcp.session_store_path)
+    session_db = data_dir / "sessions.db"
+    session_manager = SessionManager(str(session_db))
     await session_manager.initialize()
 
     # Initialize pool manager (file-based SQLite for persistence across calls)
-    pool_manager = PoolManager(".ghdisc/pools.db")
+    pool_manager = PoolManager(str(data_dir / "pools.db"))
     await pool_manager.initialize()
 
     # Initialize orchestrators
@@ -104,7 +131,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     scoring_engine = ScoringEngine(settings.scoring)
     ranker = Ranker(settings.scoring)
     feature_store = FeatureStore(
-        db_path=".ghdisc/features.db",
+        db_path=str(data_dir / "features.db"),
         ttl_hours=settings.scoring.feature_store_ttl_hours,
     )
     await feature_store.initialize()
