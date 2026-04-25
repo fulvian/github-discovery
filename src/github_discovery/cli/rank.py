@@ -249,8 +249,8 @@ async def _rank_from_pool(
 
             # Try to get latest score (may include Gate 3 data from deep-eval)
             latest_score = await store.get_latest(candidate.full_name)
-            if latest_score is not None and latest_score.gate3_available:
-                # Gate 3 data already incorporated — use cached result directly
+            if latest_score is not None and latest_score.quality_score > 0:
+                # Already scored (Gate 1+2 or Gate 3) — use cached result directly
                 results.append(latest_score)
                 continue
 
