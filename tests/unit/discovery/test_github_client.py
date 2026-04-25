@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from pytest_httpx import HTTPXMock
 
 from github_discovery.config import GitHubSettings
 from github_discovery.discovery.github_client import GitHubRestClient
-from github_discovery.exceptions import RateLimitError
 
 # --- Fixtures ---
 
@@ -116,26 +117,40 @@ class TestRateLimitTracking:
             await client.get("/test")
             assert client.rate_limit_remaining == 4990
 
-    async def test_rate_limit_enforcement_raises(
+    async def test_rate_limit_waits_and_retries(
         self,
         httpx_mock: HTTPXMock,
         client: GitHubRestClient,
         rate_limit_headers_low: dict[str, str],
     ) -> None:
-        """Should raise RateLimitError when remaining < watermark."""
+        """When remaining < watermark, client waits then retries successfully.
+
+        The new behavior: instead of raising RateLimitError immediately,
+        the client waits with exponential backoff and retries.
+        """
         # First request sets low remaining
         httpx_mock.add_response(
             url="https://api.github.com/first",
             json={"ok": True},
             headers=rate_limit_headers_low,
         )
+        # Second request (after retry) succeeds
+        httpx_mock.add_response(
+            url="https://api.github.com/second",
+            json={"ok": True},
+            headers=rate_limit_headers_low,
+        )
 
-        async with client:
-            await client.get("/first")
-            # Now remaining=5 < watermark=50
-            with pytest.raises(RateLimitError) as exc_info:
-                await client.get("/second")
-            assert exc_info.value.remaining == 5
+        # Mock asyncio.sleep to skip the backoff wait
+        with patch(
+            "github_discovery.discovery.github_client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            async with client:
+                await client.get("/first")
+                # Now remaining=5 < watermark=10 → waits then retries
+                result = await client.get("/second")
+                assert result.status_code == 200
 
 
 class TestConditionalRequests:
@@ -311,13 +326,17 @@ class TestSearch:
             assert len(items) == 2
             assert items[0]["full_name"] == "user/repo1"
 
-    async def test_search_rate_limiting(
+    async def test_search_waits_and_retries(
         self,
         httpx_mock: HTTPXMock,
         client: GitHubRestClient,
     ) -> None:
-        """Search should use stricter rate limit watermark."""
-        # First request sets search remaining to 2 (< watermark of 5)
+        """Search should wait and retry when search rate limit is low.
+
+        The new behavior: client waits with backoff and retries instead
+        of raising immediately.
+        """
+        # First search: search remaining=2 (< watermark=3)
         httpx_mock.add_response(
             json={
                 "total_count": 1,
@@ -329,23 +348,40 @@ class TestSearch:
                 "x-ratelimit-reset": "1700001000",
             },
         )
+        # Second search (after retry) succeeds
+        httpx_mock.add_response(
+            json={
+                "total_count": 1,
+                "items": [{"full_name": "user/repo2"}],
+            },
+            headers={
+                "x-ratelimit-remaining": "2",
+                "x-ratelimit-limit": "30",
+                "x-ratelimit-reset": "1700001000",
+            },
+        )
 
-        async with client:
-            # First search works
-            items, _ = await client.search(
-                "/search/repositories",
-                "test",
-                max_pages=1,
-            )
-            assert len(items) == 1
+        # Mock asyncio.sleep to skip the backoff wait
+        with patch(
+            "github_discovery.discovery.github_client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            async with client:
+                # First search works
+                items, _ = await client.search(
+                    "/search/repositories",
+                    "test",
+                    max_pages=1,
+                )
+                assert len(items) == 1
 
-            # Second search should fail (search remaining=2 < watermark=5)
-            with pytest.raises(RateLimitError):
-                await client.search(
+                # Second search: remaining=2 < watermark=3 → waits then retries
+                items2, _ = await client.search(
                     "/search/repositories",
                     "test2",
                     max_pages=1,
                 )
+                assert len(items2) == 1
 
 
 class TestCheckRateLimit:
@@ -388,20 +424,36 @@ class TestContextManager:
 class Test403RateLimitResponse:
     """Tests for 403 rate limit response handling."""
 
-    async def test_403_rate_limit_raises(
+    async def test_403_rate_limit_retries_and_succeeds(
         self,
         httpx_mock: HTTPXMock,
         client: GitHubRestClient,
         rate_limit_headers_ok: dict[str, str],
     ) -> None:
-        """403 with rate limit text should raise RateLimitError."""
+        """403 rate limit response should trigger retry with backoff.
+
+        The new behavior: on 403 rate limit, client waits with exponential
+        backoff and retries. All retries exhausted → RateLimitError.
+        """
+        # First request: 403 rate limit
         httpx_mock.add_response(
             url="https://api.github.com/test",
             status_code=403,
             json={"message": "API rate limit exceeded"},
             headers=rate_limit_headers_ok,
         )
+        # Second request (after retry): succeeds
+        httpx_mock.add_response(
+            url="https://api.github.com/test",
+            json={"ok": True},
+            headers=rate_limit_headers_ok,
+        )
 
-        async with client:
-            with pytest.raises(RateLimitError):
-                await client.get("/test")
+        # Mock asyncio.sleep to skip the backoff wait
+        with patch(
+            "github_discovery.discovery.github_client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            async with client:
+                result = await client.get("/test")
+                assert result.status_code == 200

@@ -7,9 +7,11 @@ httpx.AsyncClient under the hood for connection pooling and HTTP/2.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import random
 import re
-from collections.abc import Generator  # noqa: TC003
+from collections.abc import Awaitable, Callable, Generator  # noqa: TC003
 from datetime import UTC, datetime
 from typing import Any
 
@@ -26,12 +28,14 @@ _GITHUB_API_VERSION = "2022-11-28"
 _GITHUB_ACCEPT = "application/vnd.github+json"
 
 # Default thresholds
-_RATE_LIMIT_LOW_WATERMARK = 50  # Stop making requests when remaining < this
-_SEARCH_RATE_LIMIT_LOW_WATERMARK = 5
+_RATE_LIMIT_LOW_WATERMARK = 10  # Wait when remaining < this (was 50 — too aggressive)
+_SEARCH_RATE_LIMIT_LOW_WATERMARK = 3
 _DEFAULT_PER_PAGE = 100
 _DEFAULT_MAX_PAGES = 10
 _RETRY_BACKOFF_BASE = 1.0  # seconds
-_RETRY_MAX_ATTEMPTS = 3
+_RETRY_MAX_ATTEMPTS = 5  # Increased from 3
+_RETRY_MAX_WAIT = 60.0  # Max seconds to wait between retries
+_JITTER_FACTOR = 0.5  # Random jitter: ±50% of wait time
 
 # HTTP status codes
 _HTTP_FORBIDDEN = 403
@@ -116,8 +120,62 @@ class GitHubRestClient:
                 with contextlib.suppress(ValueError, OSError):
                     self._search_reset_at = datetime.fromtimestamp(int(reset), tz=UTC)
 
-    def _check_rate_limit(self, *, is_search: bool = False) -> None:
-        """Raise RateLimitError if remaining is below watermark."""
+    async def _await_if_rate_limited(self, *, is_search: bool = False) -> None:
+        """Async wait if rate limit is near exhaustion.
+
+        Instead of raising, this method waits until the rate limit resets
+        or until a safe number of requests is available. Uses exponential
+        backoff with jitter to avoid thundering herd.
+        """
+        if is_search:
+            remaining = self._search_remaining
+            reset_at = self._search_reset_at
+            watermark = _SEARCH_RATE_LIMIT_LOW_WATERMARK
+        else:
+            remaining = self._core_remaining
+            reset_at = self._core_reset_at
+            watermark = _RATE_LIMIT_LOW_WATERMARK
+
+        if remaining is None:
+            # Never checked — assume we're fine
+            return
+
+        if remaining >= watermark:
+            return
+
+        # Rate limit is low. Determine the wait time.
+        wait_seconds: float
+
+        if reset_at is not None:
+            # GitHub told us when it resets — wait until then
+            now = datetime.now(tz=UTC)
+            if reset_at > now:
+                wait_seconds = (reset_at - now).total_seconds()
+                logger.info(
+                    "github_rate_limit_low_awaiting_reset",
+                    remaining=remaining,
+                    reset_at=reset_at.isoformat(),
+                    wait_seconds=wait_seconds,
+                    is_search=is_search,
+                )
+                await asyncio.sleep(min(wait_seconds, _RETRY_MAX_WAIT))
+        else:
+            # No reset time known — use exponential backoff
+            wait_seconds = _RETRY_BACKOFF_BASE
+            logger.info(
+                "github_rate_limit_low_using_backoff",
+                remaining=remaining,
+                wait_seconds=wait_seconds,
+                is_search=is_search,
+            )
+            await asyncio.sleep(wait_seconds)
+
+    def _check_rate_limit(self, *, is_search: bool = False) -> bool:
+        """Check if rate limit is low (for synchronous pre-request guard).
+
+        Returns True if safe to proceed, False if rate limited.
+        Use _await_if_rate_limited() for async waiting behavior.
+        """
         if is_search:
             remaining = self._search_remaining
             watermark = _SEARCH_RATE_LIMIT_LOW_WATERMARK
@@ -133,12 +191,104 @@ class GitHubRestClient:
                 if self._core_reset_at
                 else "unknown"
             )
-            raise RateLimitError(
-                f"GitHub API rate limit near exhaustion "
-                f"(remaining={remaining}, watermark={watermark})",
-                reset_at=reset_at,
+            logger.warning(
+                "github_rate_limit_low",
                 remaining=remaining,
+                watermark=watermark,
+                reset_at=reset_at,
+                is_search=is_search,
             )
+            return False
+        return True
+
+    async def _retry_on_rate_limit(
+        self,
+        request_fn: Callable[[], Awaitable[httpx.Response]],
+        *,
+        is_search: bool = False,
+        max_attempts: int = _RETRY_MAX_ATTEMPTS,
+    ) -> httpx.Response:
+        """Execute a request with exponential backoff retry on rate limit.
+
+        On 403 with rate limit error, waits with exponential backoff and retries.
+        On success or non-rate-limit errors, returns/re-raises immediately.
+        """
+        last_exception: Exception | None = None
+
+        for attempt in range(max_attempts):
+            try:
+                # Proactive wait if rate limit is low before making request
+                await self._await_if_rate_limited(is_search=is_search)
+
+                response = await request_fn()
+
+                # Track rate limits from response (even successful ones)
+                await self._track_rate_limits(response)
+
+                # Check if this is a rate limit error
+                if (
+                    response.status_code == _HTTP_FORBIDDEN
+                    and "rate limit" in response.text.lower()
+                ):
+                    # Extract reset time from response headers
+                    reset_header = response.headers.get("x-ratelimit-reset")
+                    if reset_header:
+                        with contextlib.suppress(ValueError, OSError):
+                            reset_ts = datetime.fromtimestamp(int(reset_header), tz=UTC)
+                            if is_search:
+                                self._search_reset_at = reset_ts
+                            else:
+                                self._core_reset_at = reset_ts
+
+                    # Calculate backoff with jitter
+                    backoff = min(_RETRY_BACKOFF_BASE * (2**attempt), _RETRY_MAX_WAIT)
+                    jitter = backoff * _JITTER_FACTOR
+                    wait_time = max(1.0, backoff + random.uniform(-jitter, jitter))  # noqa: S311
+
+                    logger.warning(
+                        "github_rate_limit_403_retry",
+                        attempt=attempt + 1,
+                        max_attempts=max_attempts,
+                        wait_seconds=wait_time,
+                        is_search=is_search,
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+
+                return response
+
+            except RateLimitError as e:
+                backoff = min(_RETRY_BACKOFF_BASE * (2**attempt), _RETRY_MAX_WAIT)
+                jitter = backoff * _JITTER_FACTOR
+                wait_time = max(1.0, backoff + random.uniform(-jitter, jitter))  # noqa: S311
+
+                logger.warning(
+                    "github_rate_limit_error_retry",
+                    attempt=attempt + 1,
+                    max_attempts=max_attempts,
+                    wait_seconds=wait_time,
+                    error=str(e),
+                    is_search=is_search,
+                )
+                await asyncio.sleep(wait_time)
+            except httpx.HTTPStatusError:
+                # Non-403 HTTP errors — don't retry, just re-raise
+                raise
+
+        # All retries exhausted
+        if last_exception:
+            raise last_exception
+        raise RateLimitError(
+            "GitHub API rate limit: all retries exhausted",
+            reset_at=(
+                self._search_reset_at.isoformat()
+                if is_search and self._search_reset_at
+                else self._core_reset_at.isoformat()
+                if self._core_reset_at
+                else None
+            ),
+            remaining=0,
+        )
 
     # --- Public API ---
 
@@ -170,7 +320,10 @@ class GitHubRestClient:
         etag: str | None = None,
         is_search: bool = False,
     ) -> httpx.Response:
-        """Send an authenticated GET request.
+        """Send an authenticated GET request with automatic rate limit retry.
+
+        Uses exponential backoff with jitter on 403 rate limit errors.
+        Proactively waits when rate limit is low before making requests.
 
         Args:
             url: Full URL or path relative to base_url.
@@ -182,10 +335,8 @@ class GitHubRestClient:
             httpx Response. Check status_code == _HTTP_NOT_MODIFIED for conditional miss.
 
         Raises:
-            RateLimitError: If rate limit is below watermark before request.
+            RateLimitError: Only if all retries are exhausted.
         """
-        self._check_rate_limit(is_search=is_search)
-
         headers: dict[str, str] = {}
         if etag is not None:
             headers["If-None-Match"] = f'"{etag}"'
@@ -193,14 +344,10 @@ class GitHubRestClient:
         if not url.startswith("http"):
             url = f"{self._base_url}{url}"
 
-        response = await self._client.get(url, params=params, headers=headers)
+        async def _request() -> httpx.Response:
+            return await self._client.get(url, params=params, headers=headers)
 
-        if response.status_code == _HTTP_FORBIDDEN and "rate limit" in response.text.lower():
-            raise RateLimitError(
-                "GitHub API rate limit exceeded",
-                reset_at=self._core_reset_at.isoformat() if self._core_reset_at else None,
-                remaining=0,
-            )
+        response = await self._retry_on_rate_limit(_request, is_search=is_search)
 
         # 304 Not Modified is a valid response for conditional requests
         if response.status_code != _HTTP_NOT_MODIFIED:
@@ -235,6 +382,9 @@ class GitHubRestClient:
     ) -> list[dict[str, Any]]:
         """Paginate through all pages using Link header.
 
+        Each page request is retried with exponential backoff on rate limit.
+        Proactively waits when rate limit is low before fetching each page.
+
         Args:
             url: Starting URL (relative or absolute).
             params: Query parameters (per_page added automatically).
@@ -254,19 +404,19 @@ class GitHubRestClient:
             if current_url is None:
                 break
 
-            self._check_rate_limit()
-
             # Only pass params for the first page (subsequent pages use full URLs)
             request_params = merged_params if page_num == 0 else None
 
-            response = await self._client.get(current_url, params=request_params)
+            # Capture current values to avoid closure capturing loop variables (B023)
+            _current_url: str = current_url
 
-            if response.status_code == _HTTP_FORBIDDEN and "rate limit" in response.text.lower():
-                raise RateLimitError(
-                    "GitHub API rate limit exceeded during pagination",
-                    reset_at=self._core_reset_at.isoformat() if self._core_reset_at else None,
-                    remaining=0,
-                )
+            async def _request(
+                _url: str = _current_url,
+                _params: dict[str, str | int] | None = request_params,
+            ) -> httpx.Response:
+                return await self._client.get(_url, params=_params)
+
+            response = await self._retry_on_rate_limit(_request)
 
             response.raise_for_status()
             data = response.json()
@@ -308,6 +458,9 @@ class GitHubRestClient:
     ) -> tuple[list[dict[str, Any]], int]:
         """Execute a GitHub search API call with pagination.
 
+        Each page request is retried with exponential backoff on rate limit.
+        Proactively waits when search rate limit is low before each request.
+
         Args:
             endpoint: Search endpoint path (/search/repositories or /search/code).
             query: GitHub search query string (with qualifiers).
@@ -320,7 +473,7 @@ class GitHubRestClient:
             Tuple of (items, total_count).
 
         Raises:
-            RateLimitError: If search rate limit is near exhaustion.
+            RateLimitError: Only if all retries are exhausted.
         """
         all_items: list[dict[str, Any]] = []
         total_count = 0
@@ -336,19 +489,19 @@ class GitHubRestClient:
         url = endpoint if endpoint.startswith("http") else f"{self._base_url}{endpoint}"
 
         for page_num in range(max_pages):
-            self._check_rate_limit(is_search=True)
             params["page"] = page_num + 1
 
-            response = await self._client.get(url, params=params)
+            # Capture loop variables to avoid closure capturing by reference (B023)
+            _url = url
+            _params = dict(params)
 
-            if response.status_code == _HTTP_FORBIDDEN and "rate limit" in response.text.lower():
-                raise RateLimitError(
-                    "GitHub search rate limit exceeded",
-                    reset_at=(
-                        self._search_reset_at.isoformat() if self._search_reset_at else None
-                    ),
-                    remaining=0,
-                )
+            async def _request(
+                _u: str = _url,
+                _p: dict[str, str | int] = _params,
+            ) -> httpx.Response:
+                return await self._client.get(_u, params=_p)
+
+            response = await self._retry_on_rate_limit(_request, is_search=True)
 
             response.raise_for_status()
             data = response.json()
