@@ -82,7 +82,7 @@ async def display_discovery_progress(
 
             result = await orch.discover(dq)
 
-            total = result.total_count if hasattr(result, "total_count") else 0
+            total = result.total_candidates if hasattr(result, "total_candidates") else 0
             progress.update(task, completed=total)
 
             # Show results summary
@@ -95,8 +95,11 @@ async def display_discovery_progress(
                 )
             )
 
-            # Show top 5 table
-            candidates = result.candidates if hasattr(result, "candidates") else []
+            # Show top 5 table — load candidates from pool
+            candidates = []
+            pool = await pool_mgr.get_pool(result.pool_id)
+            if pool is not None:
+                candidates = pool.candidates
             if candidates:
                 table = Table(title="Top 5 Candidates", show_lines=True)
                 table.add_column("#", style="bold cyan", width=4)
@@ -255,7 +258,43 @@ async def display_assessment_progress(
             exit_with_error("No candidates to assess.")
             return  # unreachable
 
-        orch = AssessmentOrchestrator(settings)
+        # Build screening lookup from FeatureStore for hard gate enforcement
+        from github_discovery.config import Settings as RealSettings
+        from github_discovery.models.screening import (
+            MetadataScreenResult,
+            ScreeningResult,
+            StaticScreenResult,
+        )
+        from github_discovery.scoring.feature_store import FeatureStore
+
+        real_settings = settings if isinstance(settings, RealSettings) else RealSettings()
+        store = FeatureStore(db_path=".ghdisc/features.db")
+        await store.initialize()
+
+        screening_lookup: dict[str, ScreeningResult] = {}
+        for candidate in candidates:
+            score_result = await store.get_latest(candidate.full_name)
+            if score_result is not None:
+                gate1_pass = score_result.gate1_total >= real_settings.screening.min_gate1_score
+                gate2_pass = score_result.gate2_total >= real_settings.screening.min_gate2_score
+                screening_lookup[candidate.full_name] = ScreeningResult(
+                    full_name=candidate.full_name,
+                    commit_sha=score_result.commit_sha,
+                    gate1=MetadataScreenResult(
+                        full_name=candidate.full_name,
+                        gate1_total=score_result.gate1_total,
+                        gate1_pass=gate1_pass,
+                        threshold_used=real_settings.screening.min_gate1_score,
+                    ),
+                    gate2=StaticScreenResult(
+                        full_name=candidate.full_name,
+                        gate2_total=score_result.gate2_total,
+                        gate2_pass=gate2_pass,
+                        threshold_used=real_settings.screening.min_gate2_score,
+                    ),
+                )
+
+        orch = AssessmentOrchestrator(real_settings)
 
         total_tokens = 0
         assessed = 0
@@ -267,8 +306,9 @@ async def display_assessment_progress(
             )
 
             for candidate in candidates:
+                screening = screening_lookup.get(candidate.full_name)
                 try:
-                    result = await orch.quick_assess(candidate, screening=None)
+                    result = await orch.quick_assess(candidate, screening=screening)
                     assessed += 1
                     if result.token_usage:
                         total_tokens += result.token_usage.total_tokens
