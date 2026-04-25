@@ -22,12 +22,17 @@ class TestScoringEngine:
     """Tests for the ScoringEngine."""
 
     def test_score_no_data(self, scoring_engine) -> None:
-        """Score with no screening or assessment."""
+        """Score with no screening or assessment → quality_score = 0.0.
+
+        All dimensions get default_neutral (0.5, confidence 0.0).
+        Dimensions with confidence 0.0 are excluded from the composite,
+        so quality_score is 0.0 (no evaluated data).
+        """
         candidate = _make_candidate()
         result = scoring_engine.score(candidate)
         assert isinstance(result, ScoreResult)
         assert result.full_name == "test/repo"
-        assert result.quality_score > 0.0
+        assert result.quality_score == 0.0
         assert len(result.dimension_scores) == 8
         assert result.confidence == 0.0
         assert result.gate3_available is False
@@ -97,10 +102,22 @@ class TestScoringEngine:
         assert result_lib.quality_score != result_ml.quality_score
 
     def test_value_score_computed(self, scoring_engine) -> None:
-        """Value score is computed as quality_score / log10(stars + 10)."""
+        """Value score equals quality_score (star-neutral).
+
+        With no data, quality_score = 0.0 (all dimensions excluded),
+        so value_score = 0.0. With screening data, both are > 0.
+        """
+        # No data → 0.0
+        candidate_no_data = _make_candidate(stars=100)
+        result_no_data = scoring_engine.score(candidate_no_data)
+        assert result_no_data.value_score == 0.0
+
+        # With screening data → > 0
         candidate = _make_candidate(stars=100)
-        result = scoring_engine.score(candidate)
+        screening = _make_screening_result()
+        result = scoring_engine.score(candidate, screening=screening)
         assert result.value_score > 0.0
+        assert result.value_score == result.quality_score
 
     def test_quality_score_bounds(self, scoring_engine) -> None:
         """Quality score is always between 0.0 and 1.0."""

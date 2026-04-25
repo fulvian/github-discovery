@@ -360,12 +360,21 @@ class ScoringEngine:
         dimension_scores: dict[ScoreDimension, DimensionScoreInfo],
         profile: DomainProfile,
     ) -> float:
-        """Apply domain-specific weights to compute composite quality_score."""
+        """Apply domain-specific weights to compute composite quality_score.
+
+        Dimensions with confidence 0.0 (no data / neutral default) are
+        excluded from the weighted average. Their weight is redistributed
+        proportionally to the dimensions that have actual data. This prevents
+        phantom 0.5 defaults from inflating or deflating the composite score.
+        """
         weighted_sum = 0.0
         total_weight = 0.0
 
         for dim, info in dimension_scores.items():
             weight = profile.dimension_weights.get(dim, 0.0)
+            # Skip dimensions with no real data (confidence 0.0 = default_neutral)
+            if info.confidence <= 0.0:
+                continue
             weighted_sum += info.value * weight
             total_weight += weight
 
