@@ -733,3 +733,15 @@ Fase 2 addresses findings from an independent 4-LLM audit of the scoring pipelin
 - Created wiki page `architecture/phase2-remediation.md` — Decision log for all Fase 2 waves: 9 key decisions (D1–D9), acceptance criteria status (13/15 done), files modified inventory
 - Verified T3.3 (orphan clone cleanup) and T3.5 (`ghdisc db prune`) already implemented
 - Updated wiki index with new page
+
+## [2026-04-26] ingest + lint | Comprehensive wiki update — all Fase 2 pages current
+
+Updated 5 wiki pages with complete Fase 2 Wave 0–5 coverage:
+- `architecture/tiered-pipeline.md` — Added coverage/confidence section, derivation map table, error handling in pipeline, cross-references. Updated header with Fase 2 sources. Fixed "Anti-star bias" → "Star-neutral"
+- `domain/domain-strategy.md` — Expanded from 8 to 12 domains with gate thresholds table. Added per-profile derivation map (T5.1), per-profile gate thresholds (T5.2), custom profile loading (T5.3), CLI commands, configuration instructions. Updated confidence medium → high
+- `patterns/operational-rules.md` — Added full exception hierarchy tree (including GitHubFetchError subtypes), resource lifecycle rules (LLM provider, FeatureStore, clone cleanup), cross-references to phase2-remediation and screening-gates
+- `architecture/phase2-remediation.md` — Added D10 (profiles CLI decision), expanded source file inventory (24 files), updated status to COMMITTED
+- `architecture/anti-star-bias.md` — Reviewed, already current
+
+Lint: 10 pre-existing broken links in older Phase 0-7 pages (plan file path changes). All Fase 2-era pages clean.
+Commit: b0945c7 on main

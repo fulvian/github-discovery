@@ -55,10 +55,29 @@ Explore → Plan → Implement → Verify → Review → Ship
 
 ## Error Handling Standards
 
-- Custom exception hierarchy: `GitHubDiscoveryError` → `DiscoveryError`, `ScreeningError`, `AssessmentError`, `ScoringError`, `ConfigurationError`
+### Custom Exception Hierarchy
+
+```
+GitHubDiscoveryError (base)
+├── DiscoveryError
+├── ScreeningError
+│   └── HardGateViolationError
+├── AssessmentError
+├── ScoringError
+├── ConfigurationError
+└── GitHubFetchError (Fase 2 Wave 3)
+    ├── GitHubAuthError (401/403)
+    ├── GitHubRateLimitError (429 — includes retry_after)
+    └── GitHubServerError (5xx)
+```
+
+### Error Handling Rules
+
 - Structured error results over exceptions for expected failures (e.g., repo not scorable)
 - `structlog` for structured JSON logging — never `print()` for diagnostics
 - Always include context in error messages (repo URL, dimension, gate level)
+- Typed GitHub API errors (`GitHubFetchError` hierarchy) enable differentiated retry behavior
+- Non-retryable errors (`GitHubAuthError`, generic 4xx) fail fast with diagnostics
 
 ## Retry/Backoff Policy (Fase 2 Wave 3)
 
@@ -67,7 +86,16 @@ Explore → Plan → Implement → Verify → Review → Ship
 - Backoff uses exponential jitter with bounded wait; `Retry-After` is honored when provided
 - Non-retryable classes (`GitHubAuthError`, generic 4xx) fail fast and propagate explicit diagnostics
 
+## Resource Lifecycle (Fase 2 Wave 3)
+
+- **LLM Provider**: Explicit `AsyncOpenAI` handle with proper `close()`. Supports `async with` context manager. Assessment orchestrator nullifies provider reference after close
+- **FeatureStore**: TTL-based expiry with consistent `expires_at` semantics across read/stats/cleanup paths. Legacy rows (pre-migration) fall back to `scored_at` + TTL
+- **Clone directories**: Orphan cleanup at MCP server startup (`cleanup_orphan_clones()`) removes stale clones from interrupted runs
+- **`ghdisc db prune` CLI**: Manual FeatureStore cleanup with dry-run support
+
 ## See Also
 
 - [Agent Workflow Patterns](agent-workflows.md)
 - [Tiered Pipeline](../architecture/tiered-pipeline.md)
+- [Phase 2 Remediation Decisions](../architecture/phase2-remediation.md)
+- [Screening Gates Detail](../domain/screening-gates.md)

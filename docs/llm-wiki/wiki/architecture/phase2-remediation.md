@@ -12,7 +12,7 @@ Confidence: high
 Post-independent audit remediation (4 LLM auditors: Claude, Gemini, ChatGPT, Perplexity).
 Average scoring logic rating: 5.5–6.5/10. Fase 2 addresses all critical and high-priority issues.
 
-**Status: Waves 0–3, 5 COMPLETE. Wave 4 infrastructure ready (external labeling pending).**
+**Status: Waves 0–3, 5 COMPLETE + COMMITTED. Wave 4 infrastructure ready (external labeling pending).**
 
 ## Wave Summary
 
@@ -83,6 +83,12 @@ Average scoring logic rating: 5.5–6.5/10. Fase 2 addresses all critical and hi
 
 **Rationale**: Users set `GHDISC_SCORING_CUSTOM_PROFILES_PATH=/path/to/profiles.yaml` once. All pipeline components that create a `ProfileRegistry` automatically load custom profiles. No manual wiring needed.
 
+### D10: Profiles CLI subcommand (T5.3)
+
+**Decision**: Added `ghdisc profiles list`, `ghdisc profiles show <domain>`, `ghdisc profiles validate <path>` commands.
+
+**Rationale**: Users need to inspect loaded profiles (including custom ones) and validate profile files before deployment. The `list` command shows all profiles with thresholds in tabular form. The `show` command gives full detail (weights, derivation map, thresholds). The `validate` command checks YAML/TOML files without loading.
+
 ## Acceptance Criteria Status
 
 | # | Criterion | Status |
@@ -107,20 +113,29 @@ Average scoring logic rating: 5.5–6.5/10. Fase 2 addresses all critical and hi
 
 ### Source files
 - `src/github_discovery/models/scoring.py` — derivation_map field, gate_thresholds on all profiles
-- `src/github_discovery/models/screening.py` — SubScore validators
-- `src/github_discovery/scoring/engine.py` — _resolve_derivation_map merge, coverage damping
-- `src/github_discovery/scoring/profiles.py` — YAML/TOML loading, case-insensitive domain_type
+- `src/github_discovery/models/screening.py` — SubScore validators, degraded_count field
+- `src/github_discovery/scoring/engine.py` — _resolve_derivation_map merge, coverage damping, _MAPPING_ENTRY_LENGTH
+- `src/github_discovery/scoring/profiles.py` — YAML/TOML loading, case-insensitive domain_type, auto-load
 - `src/github_discovery/scoring/confidence.py` — weighted confidence, per-dimension caps
 - `src/github_discovery/scoring/value_score.py` — star-neutral compute
 - `src/github_discovery/scoring/ranker.py` — blake2b tie-breaking, star-neutral sort
 - `src/github_discovery/scoring/feature_store.py` — TTL semantics, prune_expired
+- `src/github_discovery/scoring/cross_domain.py` — deduplicated normalization
+- `src/github_discovery/scoring/types.py` — HeuristicFallback model
 - `src/github_discovery/screening/orchestrator.py` — ProfileRegistry thresholds
-- `src/github_discovery/screening/gate1_metadata.py` — typed error handling
+- `src/github_discovery/screening/gate1_metadata.py` — typed error handling, degraded tracking
 - `src/github_discovery/screening/gate2_static.py` — orphan cleanup
+- `src/github_discovery/assessment/llm_provider.py` — AsyncOpenAI lifecycle, async context manager
+- `src/github_discovery/assessment/orchestrator.py` — provider nullification after close
 - `src/github_discovery/assessment/types.py` — HeuristicFallback model
 - `src/github_discovery/assessment/heuristics.py` — path-based test detection
-- `src/github_discovery/config.py` — ScoringSettings fields
+- `src/github_discovery/exceptions.py` — GitHubFetchError hierarchy (Auth, RateLimit, Server)
+- `src/github_discovery/discovery/github_client.py` — tenacity fetch, Retry-After, typed error mapping
+- `src/github_discovery/config.py` — ScoringSettings fields (custom_profiles_path, etc.)
+- `src/github_discovery/cli/app.py` — profiles command registration
+- `src/github_discovery/cli/profiles.py` — NEW: ghdisc profiles list/show/validate
 - `src/github_discovery/cli/db.py` — prune command
+- `src/github_discovery/mcp/server.py` — orphan cleanup at startup
 
 ### Documentation
 - `docs/foundation/SCORING_METHODOLOGY.md` — NEW (T2.1)

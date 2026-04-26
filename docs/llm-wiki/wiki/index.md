@@ -5,7 +5,7 @@
 
 ## Architecture
 
-- [Tiered Scoring Pipeline](architecture/tiered-pipeline.md) — 4-gate progressive pipeline: discovery → metadata screening → static/security screening → LLM deep assessment → ranking | Updated: 2026-04-22
+- [Tiered Scoring Pipeline](architecture/tiered-pipeline.md) — 4-gate progressive pipeline: discovery → metadata screening → static/security screening → LLM deep assessment → ranking. Coverage damping, derivation map, confidence per dimension, error handling (Fase 2) | Updated: 2026-04-26
 - [MCP-Native Agentic Integration Architecture](architecture/mcp-native-design.md) — MCP-first design principles, progressive deepening, session-aware tools, agent workflows | Updated: 2026-04-22
 - [Star-Neutral Quality Scoring](architecture/anti-star-bias.md) — Star-neutral design: value_score = quality_score, corroboration levels, hidden gem as informational label (ScoringSettings single-source), quality-first ranking, deterministic blake2b tie-breaking | Updated: 2026-04-26
 - [Option C Hybrid Architecture Decision](architecture/option-c-hybrid.md) — Architecture decision: API+Worker+MCP native+CLI hybrid, now evolved to MCP-native | Updated: 2026-04-22
@@ -25,7 +25,7 @@
 - [Discovery Channels and Strategies](domain/discovery-channels.md) — 6 discovery channels: Search, Code Search, Dependency, Registry, Awesome Lists, Seed Expansion | Updated: 2026-04-22
 - [Screening Gates Detail](domain/screening-gates.md) — Gate 1 metadata sub-scores, Gate 2 static/security sub-scores, degraded-mode handling, typed fetch errors, and hard gate enforcement | Updated: 2026-04-26
 - [Competitive Landscape and Gap Analysis](domain/competitive-landscape.md) — Existing projects (github_repo_classifier, CHAOSS, OpenSSF, etc.) and the gap GitHub Discovery fills | Updated: 2026-04-22
-- [Domain Strategy and Repository Taxonomy](domain/domain-strategy.md) — Domain taxonomy (CLI, web_framework, data_tool, etc.), domain-specific weights and thresholds | Updated: 2026-04-22
+- [Domain Strategy and Repository Taxonomy](domain/domain-strategy.md) — 12 domain types, domain-specific weights, thresholds, star baselines, per-profile derivation maps, custom YAML/TOML profiles, ghdisc profiles CLI | Updated: 2026-04-26
 
 ## Patterns
 
