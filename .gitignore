@@ -61,3 +61,6 @@ data/raw/
 
 # Obsidian (local editor)
 .obsidian/
+
+# Communication drafts (not for repo)
+docs/communication/

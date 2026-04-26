@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import logging
 import sys
+from typing import TYPE_CHECKING
 
 import structlog
-from structlog.types import EventDict
+
+if TYPE_CHECKING:
+    from structlog.types import EventDict
 
 
 def _safe_add_logger_name(
