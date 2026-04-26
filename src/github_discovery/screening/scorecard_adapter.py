@@ -19,6 +19,7 @@ _SCORECARD_API_BASE = "https://api.scorecard.dev"
 _SCORECARD_ENDPOINT = "/projects/github.com/{owner}/{repo}"
 _SCORECARD_TIMEOUT = 30.0
 _HTTP_NOT_FOUND = 404
+_FALLBACK_SCORE = 0.3  # Align with gate2_static._FALLBACK_SCORE — no data ≠ neutral
 
 
 class ScorecardAdapter:
@@ -50,7 +51,7 @@ class ScorecardAdapter:
             if response.status_code == _HTTP_NOT_FOUND:
                 logger.info("scorecard_not_scored", repo=candidate.full_name)
                 return SecurityHygieneScore(
-                    value=0.5,
+                    value=_FALLBACK_SCORE,
                     confidence=0.0,
                     notes=["Scorecard: repo not scored"],
                 )
@@ -81,14 +82,14 @@ class ScorecardAdapter:
         except httpx.TimeoutException:
             logger.warning("scorecard_timeout", repo=candidate.full_name)
             return SecurityHygieneScore(
-                value=0.5,
+                value=_FALLBACK_SCORE,
                 confidence=0.0,
                 notes=["Scorecard: request timed out"],
             )
         except Exception as e:
             logger.warning("scorecard_error", repo=candidate.full_name, error=str(e))
             return SecurityHygieneScore(
-                value=0.5,
+                value=_FALLBACK_SCORE,
                 confidence=0.0,
                 notes=[f"Scorecard: {e}"],
             )

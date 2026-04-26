@@ -80,7 +80,7 @@ class TestScorecardAdapter:
         await adapter2.close()
 
     async def test_repo_not_scored(self, httpx_mock: pytest.httpx.HTTPXMock) -> None:
-        """Mock 404 → value=0.5, confidence=0.0."""
+        """Mock 404 → value=0.3 (aligned with gate2 fallback), confidence=0.0."""
         httpx_mock.add_response(
             url="https://api.scorecard.dev/projects/github.com/test-org/test-repo",
             status_code=404,
@@ -89,13 +89,13 @@ class TestScorecardAdapter:
         adapter = ScorecardAdapter()
         result = await adapter.score(_make_candidate())
 
-        assert result.value == 0.5
+        assert result.value == 0.3
         assert result.confidence == 0.0
         assert "not scored" in result.notes[0].lower()
         await adapter.close()
 
     async def test_api_timeout(self, httpx_mock: pytest.httpx.HTTPXMock) -> None:
-        """Mock timeout → value=0.5, confidence=0.0."""
+        """Mock timeout → value=0.3 (aligned with gate2 fallback), confidence=0.0."""
         httpx_mock.add_exception(
             httpx.TimeoutException("timeout"),
             url="https://api.scorecard.dev/projects/github.com/test-org/test-repo",
@@ -104,7 +104,7 @@ class TestScorecardAdapter:
         adapter = ScorecardAdapter()
         result = await adapter.score(_make_candidate())
 
-        assert result.value == 0.5
+        assert result.value == 0.3
         assert result.confidence == 0.0
         assert "timed out" in result.notes[0].lower()
         await adapter.close()

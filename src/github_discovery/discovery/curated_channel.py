@@ -48,8 +48,28 @@ _DEFAULT_AWESOME_LISTS: dict[str, list[str]] = {
     "typescript": ["https://github.com/sembrestels/awesome-typescript"],
     "rust": ["https://github.com/rust-unofficial/awesome-rust"],
     "go": ["https://github.com/avelino/awesome-go"],
-    "default": ["https://github.com/sindresorhus/awesome"],
 }
+
+# Topic keywords that map to specific awesome lists beyond language.
+_TOPIC_AWESOME_MAP: dict[str, list[str]] = {
+    "machine-learning": ["https://github.com/josephmisiti/awesome-machine-learning"],
+    "ml": ["https://github.com/josephmisiti/awesome-machine-learning"],
+    "deep-learning": ["https://github.com/ChristosChristofidis/awesome-deep-learning"],
+    "security": ["https://github.com/sbilly/awesome-security"],
+    "static-analysis": ["https://github.com/analysis-tools-dev/static-analysis"],
+    "testing": ["https://github.com/TheJambo/awesome-testing"],
+    "devops": ["https://github.com/bregman-arie/awesome-devops"],
+    "cli": ["https://github.com/agarrharr/awesome-cli-apps"],
+    "web": ["https://github.com/rehack7/awesome-web"],
+    "data-engineering": ["https://github.com/igorbarinov/awesome-data-engineering"],
+    "database": ["https://github.com/numetriclabz/awesome-db"],
+    "monitoring": ["https://github.com/crazy-canux/awesome-monitoring"],
+    "api": ["https://github.com/Kikobeats/awesome-api"],
+}
+
+# Max candidates to return from a single curated channel invocation.
+# Prevents curated channel from flooding the pool with irrelevant results.
+_MAX_CURATED_CANDIDATES = 50
 
 # Regex to extract owner/repo from a GitHub URL.
 _OWNER_REPO_RE = re.compile(r"github\.com/([^/]+)/([^/]+)/?$")
@@ -179,25 +199,39 @@ class CuratedChannel:
     async def search(self, query: DiscoveryQuery) -> ChannelResult:
         """Search curated sources relevant to the query.
 
-        Uses a predefined mapping of languages to awesome lists.
-        Falls back to the default awesome list when no language match.
+        Uses a predefined mapping of languages and topics to awesome lists.
+        Only returns results when a relevant awesome list is found — no
+        fallback to the mega-list (sindresorhus/awesome) which returns
+        thousands of irrelevant results.
 
         Args:
-            query: Discovery query with optional language filter.
+            query: Discovery query with optional language/topic filter.
 
         Returns:
-            ChannelResult with candidates up to max_candidates.
+            ChannelResult with candidates up to _MAX_CURATED_CANDIDATES.
         """
         awesome_urls = self._resolve_awesome_lists(query)
+
+        if not awesome_urls:
+            # No relevant awesome list found — return empty rather than
+            # flooding the pool with irrelevant results from a mega-list.
+            logger.debug(
+                "curated_channel_no_match",
+                query=query.query,
+                language=query.language,
+            )
+            return self._empty_result()
+
         result = await self.parse_multiple(awesome_urls)
 
-        # Truncate to max_candidates
-        truncated = result.candidates[: query.max_candidates]
+        # Truncate to max candidates (prevent curated channel from dominating)
+        cap = min(query.max_candidates, _MAX_CURATED_CANDIDATES)
+        truncated = result.candidates[:cap]
         return ChannelResult(
             channel=result.channel,
             candidates=truncated,
             total_found=result.total_found,
-            has_more=len(result.candidates) > query.max_candidates,
+            has_more=len(result.candidates) > cap,
             elapsed_seconds=result.elapsed_seconds,
         )
 
@@ -332,12 +366,37 @@ class CuratedChannel:
     def _resolve_awesome_lists(query: DiscoveryQuery) -> list[str]:
         """Resolve which awesome lists to use based on query.
 
+        Priority:
+        1. Language match → language-specific awesome list
+        2. Topic/query keyword match → topic-specific awesome list
+        3. No match → empty list (no fallback to mega-list)
+
         Args:
-            query: Discovery query with optional language filter.
+            query: Discovery query with optional language/topic filter.
 
         Returns:
-            List of awesome list GitHub URLs.
+            List of awesome list GitHub URLs (may be empty).
         """
+        # 1. Language match
         if query.language and query.language.lower() in _DEFAULT_AWESOME_LISTS:
             return _DEFAULT_AWESOME_LISTS[query.language.lower()]
-        return _DEFAULT_AWESOME_LISTS["default"]
+
+        # 2. Topic match from query.topics or query keywords
+        query_words = [w.lower() for w in query.query.replace("-", " ").split()]
+
+        # Check explicit topics first
+        if query.topics:
+            for topic in query.topics:
+                topic_lower = topic.lower()
+                if topic_lower in _TOPIC_AWESOME_MAP:
+                    return _TOPIC_AWESOME_MAP[topic_lower]
+
+        # Then check query words against topic map
+        for word in query_words:
+            if word in _TOPIC_AWESOME_MAP:
+                return _TOPIC_AWESOME_MAP[word]
+
+        # 3. No match — return empty instead of mega-list fallback.
+        # This prevents curated channel from flooding the pool with
+        # thousands of irrelevant results from sindresorhus/awesome.
+        return []

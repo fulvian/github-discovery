@@ -2,15 +2,33 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 from github_discovery.config import Settings
+from github_discovery.models.candidate import RepoCandidate
+from github_discovery.models.enums import DiscoveryChannel
 from github_discovery.models.screening import (
     MetadataScreenResult,
     ScreeningResult,
     StaticScreenResult,
 )
 from github_discovery.models.session import SessionState
+
+
+def _make_candidate(full_name: str = "owner/repo-1") -> RepoCandidate:
+    """Create a test RepoCandidate."""
+    now = datetime.now(UTC)
+    return RepoCandidate(
+        full_name=full_name,
+        url=f"https://github.com/{full_name}",
+        html_url=f"https://github.com/{full_name}",
+        api_url=f"https://api.github.com/repos/{full_name}",
+        owner_login=full_name.split("/")[0],
+        source_channel=DiscoveryChannel.SEARCH,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 class TestDeepAssessTool:
@@ -56,6 +74,9 @@ class TestDeepAssessTool:
         with patch(
             "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
             return_value=screening_results,
+        ), patch(
+            "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
+            return_value=[_make_candidate("owner/repo-1")],
         ):
             from github_discovery.mcp.server import create_server
 
@@ -105,6 +126,9 @@ class TestDeepAssessTool:
         with patch(
             "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
             return_value=screening_results,
+        ), patch(
+            "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
+            return_value=[_make_candidate("owner/repo-1")],
         ):
             from github_discovery.mcp.server import create_server
 
@@ -164,15 +188,39 @@ class TestQuickAssessTool:
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
-        from github_discovery.mcp.server import create_server
+        # Mock screening to return passed results (required by hard gate)
+        screening_results = {
+            "owner/repo-1": ScreeningResult(
+                full_name="owner/repo-1",
+                gate1=MetadataScreenResult(
+                    full_name="owner/repo-1",
+                    gate1_total=0.7,
+                    gate1_pass=True,
+                ),
+                gate2=StaticScreenResult(
+                    full_name="owner/repo-1",
+                    gate2_total=0.6,
+                    gate2_pass=True,
+                ),
+            ),
+        }
 
-        server = create_server(settings)
-        tool_fn = server._tool_manager._tools["quick_assess"].fn
+        with patch(
+            "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
+            return_value=screening_results,
+        ), patch(
+            "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
+            return_value=[_make_candidate("owner/repo-1")],
+        ):
+            from github_discovery.mcp.server import create_server
 
-        result = await tool_fn(
-            repo_url="https://github.com/owner/repo-1",
-            ctx=mock_ctx,
-        )
+            server = create_server(settings)
+            tool_fn = server._tool_manager._tools["quick_assess"].fn
+
+            result = await tool_fn(
+                repo_url="https://github.com/owner/repo-1",
+                ctx=mock_ctx,
+            )
 
         assert result["success"] is True
         assert result["data"]["repo"] == "owner/repo-1"

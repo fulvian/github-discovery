@@ -6,6 +6,7 @@ Hard gate enforced: no Gate 3 without Gate 1 + Gate 2 pass.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import structlog
@@ -17,6 +18,7 @@ from github_discovery.mcp.config import should_register_tool
 from github_discovery.mcp.output_format import format_tool_result
 from github_discovery.mcp.progress import report_assessment_progress
 from github_discovery.mcp.server import AppContext, get_app_context
+from github_discovery.models.candidate import RepoCandidate
 from github_discovery.models.enums import (
     DiscoveryChannel,
     GateLevel,
@@ -27,7 +29,6 @@ from github_discovery.screening.types import ScreeningContext
 
 if TYPE_CHECKING:
     from github_discovery.config import Settings
-    from github_discovery.models.candidate import RepoCandidate
     from github_discovery.models.screening import ScreeningResult
 
 logger = structlog.get_logger("github_discovery.mcp.tools.assessment")
@@ -75,30 +76,11 @@ def register_assessment_tools(mcp: FastMCP, settings: Settings) -> None:
             # Resolve dimensions
             resolved_dims = _resolve_dimensions(dimensions)
 
-            # Build candidates from URLs
-            from datetime import UTC, datetime
-
-            from github_discovery.models.candidate import RepoCandidate
-
-            candidates: list[RepoCandidate] = []
-            for url in repo_urls:
-                full_name = _parse_repo_url(url)
-                if not full_name:
-                    continue
-                owner = full_name.split("/")[0]
-                now = datetime.now(UTC)
-                candidates.append(
-                    RepoCandidate(
-                        full_name=full_name,
-                        url=url,
-                        html_url=url,
-                        api_url=f"https://api.github.com/repos/{full_name}",
-                        owner_login=owner,
-                        source_channel=DiscoveryChannel.SEARCH,
-                        created_at=now,
-                        updated_at=now,
-                    ),
-                )
+            # Build candidates from URLs with real metadata enrichment
+            candidates = await _build_candidates_with_metadata(
+                app_ctx,
+                repo_urls,
+            )
 
             if not candidates:
                 return format_tool_result(
@@ -107,14 +89,23 @@ def register_assessment_tools(mcp: FastMCP, settings: Settings) -> None:
                 )
 
             # Screen candidates first (hard gate enforcement)
+            # Use Gate 1 only (metadata) for fast batch check — Gate 3
+            # will do its own deep analysis via repomix. Running Gate 2
+            # (clone + gitleaks/scc) for every repo here would double
+            # the clone overhead and cause timeouts on batch operations.
             screening_results = await _screen_for_hard_gate(
                 app_ctx,
                 candidates,
+                gate_level=GateLevel.METADATA,
             )
 
             # Filter to only candidates that passed hard gate
+            # Since deep_assess uses Gate 1 only for speed, check gate1_pass
+            # directly rather than can_proceed_to_gate3 (which requires Gate 2).
             eligible = [
-                full_name for full_name, sr in screening_results.items() if sr.can_proceed_to_gate3
+                full_name
+                for full_name, sr in screening_results.items()
+                if sr.gate1 is not None and sr.gate1.gate1_pass
             ]
             eligible_candidates = [c for c in candidates if c.full_name in eligible]
 
@@ -217,27 +208,44 @@ def register_assessment_tools(mcp: FastMCP, settings: Settings) -> None:
                     error_message=f"Invalid repository URL: {repo_url}",
                 )
 
-            from datetime import UTC, datetime
-
-            from github_discovery.models.candidate import RepoCandidate
-
-            owner = full_name.split("/")[0]
-            now = datetime.now(UTC)
-            candidate = RepoCandidate(
-                full_name=full_name,
-                url=repo_url,
-                html_url=repo_url,
-                api_url=f"https://api.github.com/repos/{full_name}",
-                owner_login=owner,
-                source_channel=DiscoveryChannel.SEARCH,
-                created_at=now,
-                updated_at=now,
+            # Build candidate with enriched metadata
+            candidates = await _build_candidates_with_metadata(
+                app_ctx,
+                [repo_url],
             )
+            if not candidates:
+                return format_tool_result(
+                    success=False,
+                    error_message=f"Could not build candidate for {repo_url}",
+                )
+            candidate = candidates[0]
+
+            # Run screening first (hard gate enforcement)
+            # Gate 1+2 is required before Gate 3 (Blueprint §16.5)
+            screening_results = await _screen_for_hard_gate(
+                app_ctx,
+                [candidate],
+            )
+            screening = screening_results.get(full_name)
+
+            if screening is None or not screening.can_proceed_to_gate3:
+                gate1_pass = screening.gate1.gate1_pass if screening and screening.gate1 else False
+                gate2_pass = screening.gate2.gate2_pass if screening and screening.gate2 else False
+                return format_tool_result(
+                    success=False,
+                    error_message=(
+                        f"Gate 1+2 hard gate blocked assessment for {full_name}. "
+                        f"Gate1={'pass' if gate1_pass else 'fail'}, "
+                        f"Gate2={'pass' if gate2_pass else 'fail'}. "
+                        f"Use screen_candidates or quick_screen first for details."
+                    ),
+                )
 
             resolved_dims = _resolve_dimensions(dimensions)
 
             result = await app_ctx.assessment_orch.quick_assess(
                 candidate,
+                screening=screening,
                 dimensions=resolved_dims,
             )
 
@@ -303,19 +311,137 @@ def register_assessment_tools(mcp: FastMCP, settings: Settings) -> None:
             )
 
 
+async def _build_candidates_with_metadata(
+    app_ctx: AppContext,
+    repo_urls: list[str],
+) -> list[RepoCandidate]:
+    """Build RepoCandidates from URLs, enriching with GitHub API metadata.
+
+    Fetches real metadata (stars, description, language, commit_sha) from
+    the GitHub REST API. Falls back to minimal candidates on API failure.
+
+    Args:
+        app_ctx: Application context with GitHub client access.
+        repo_urls: List of GitHub repository URLs.
+
+    Returns:
+        List of RepoCandidates with enriched metadata.
+    """
+    now = datetime.now(UTC)
+    candidates: list[RepoCandidate] = []
+
+    for url in repo_urls:
+        full_name = _parse_repo_url(url)
+        if not full_name:
+            continue
+
+        owner = full_name.split("/")[0]
+
+        # Attempt to fetch real metadata from GitHub API
+        candidate = await _enrich_from_github_api(
+            app_ctx,
+            full_name=full_name,
+            url=url,
+            owner=owner,
+            now=now,
+        )
+        candidates.append(candidate)
+
+    return candidates
+
+
+async def _enrich_from_github_api(
+    app_ctx: AppContext,
+    *,
+    full_name: str,
+    url: str,
+    owner: str,
+    now: datetime,
+) -> RepoCandidate:
+    """Fetch repo metadata from GitHub API and build a RepoCandidate.
+
+    Falls back to a minimal candidate if the API call fails.
+
+    Args:
+        app_ctx: Application context.
+        full_name: owner/repo string.
+        url: Original URL.
+        owner: Owner login.
+        now: Current UTC datetime.
+
+    Returns:
+        RepoCandidate with enriched metadata or minimal fallback.
+    """
+    try:
+        # Use the discovery orchestrator's REST client for GitHub API access
+        rest_client = app_ctx.discovery_orch._rest_client
+        repo_data = await rest_client.get_json(f"/repos/{full_name}")
+
+        if isinstance(repo_data, dict):
+            return RepoCandidate(
+                full_name=full_name,
+                url=url,
+                html_url=url,
+                api_url=f"https://api.github.com/repos/{full_name}",
+                owner_login=repo_data.get("owner", {}).get("login", owner),
+                description=repo_data.get("description", ""),
+                stars=repo_data.get("stargazers_count", 0),
+                language=repo_data.get("language"),
+                forks_count=repo_data.get("forks_count", 0),
+                open_issues_count=repo_data.get("open_issues_count", 0),
+                commit_sha=(repo_data.get("default_branch", {}).get("sha", "")),
+                created_at=repo_data.get("created_at", now),
+                updated_at=repo_data.get("updated_at", now),
+                pushed_at=repo_data.get("pushed_at", now),
+                source_channel=DiscoveryChannel.SEARCH,
+                archived=repo_data.get("archived", False),
+                is_fork=repo_data.get("fork", False),
+            )
+    except Exception as exc:
+        logger.debug(
+            "metadata_enrichment_failed",
+            full_name=full_name,
+            error=str(exc),
+        )
+
+    # Fallback: minimal candidate with no metadata
+    return RepoCandidate(
+        full_name=full_name,
+        url=url,
+        html_url=url,
+        api_url=f"https://api.github.com/repos/{full_name}",
+        owner_login=owner,
+        source_channel=DiscoveryChannel.SEARCH,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 async def _screen_for_hard_gate(
     app_ctx: AppContext,
     candidates: list[RepoCandidate],
+    *,
+    gate_level: GateLevel = GateLevel.STATIC_SECURITY,
 ) -> dict[str, ScreeningResult]:
     """Screen candidates for hard gate enforcement before Gate 3.
 
     Uses the shared ScreeningOrchestrator from AppContext.
-    Returns dict of ScreeningResult keyed by full_name.
+    Defaults to Gate 1+2 (STATIC_SECURITY) for full hard gate check.
+    For batch operations, callers can pass GateLevel.METADATA (Gate 1 only)
+    to avoid redundant cloning — Gate 3 will clone via repomix anyway.
+
+    Args:
+        app_ctx: Application context with screening orchestrator.
+        candidates: Candidates to screen.
+        gate_level: Which gate level to screen at.
+
+    Returns:
+        Dict of ScreeningResult keyed by full_name.
     """
     screen_ctx = ScreeningContext(
         pool_id="deep-assess-hard-gate",
         candidates=candidates,
-        gate_level=GateLevel.STATIC_SECURITY,
+        gate_level=gate_level,
     )
     results: list[ScreeningResult] = await app_ctx.screening_orch.screen(screen_ctx)
     return {r.full_name: r for r in results}

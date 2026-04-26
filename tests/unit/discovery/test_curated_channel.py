@@ -255,26 +255,22 @@ class TestSearch:
         call_url = client.get_json.call_args[0][0]
         assert "vinta/awesome-python" in call_url
 
-    async def test_search_default_list_when_no_language(self) -> None:
-        """Query without language → uses default awesome list."""
+    async def test_search_returns_empty_when_no_match(self) -> None:
+        """Query without language/topic match → empty result (no mega-list fallback)."""
         client = AsyncMock()
-
-        readme = "- [SomeRepo](https://github.com/owner/repo)\n"
-        encoded = base64.b64encode(readme.encode()).decode()
-        client.get_json = AsyncMock(
-            return_value={"content": encoded, "encoding": "base64"},
-        )
 
         channel = CuratedChannel(client)
         query = DiscoveryQuery(query="something cool")
         result = await channel.search(query)
 
         assert isinstance(result, ChannelResult)
-        call_url = client.get_json.call_args[0][0]
-        assert "sindresorhus/awesome" in call_url
+        assert result.candidates == []
+        assert result.total_found == 0
+        # No API call should be made when no awesome list matches
+        client.get_json.assert_not_called()
 
     async def test_search_respects_max_candidates(self) -> None:
-        """Search truncates candidates to max_candidates."""
+        """Search truncates candidates to min(max_candidates, _MAX_CURATED_CANDIDATES)."""
         client = AsyncMock()
 
         readme = (
@@ -292,3 +288,42 @@ class TestSearch:
         result = await channel.search(query)
 
         assert len(result.candidates) <= 2
+
+    async def test_search_caps_at_max_curated_candidates(self) -> None:
+        """Curated channel caps results at _MAX_CURATED_CANDIDATES (50)."""
+        client = AsyncMock()
+
+        # Generate a README with 100 repos
+        lines = [f"- [Repo{i}](https://github.com/user/repo{i})" for i in range(100)]
+        readme = "\n".join(lines)
+        encoded = base64.b64encode(readme.encode()).decode()
+        client.get_json = AsyncMock(
+            return_value={"content": encoded, "encoding": "base64"},
+        )
+
+        channel = CuratedChannel(client)
+        # max_candidates=500 but curated caps at 50
+        query = DiscoveryQuery(query="test", language="python", max_candidates=500)
+        result = await channel.search(query)
+
+        assert len(result.candidates) == 50
+        assert result.has_more is True
+
+    async def test_search_with_topic_match(self) -> None:
+        """Query with topic keyword matching _TOPIC_AWESOME_MAP → returns results."""
+        client = AsyncMock()
+
+        readme = "- [MLLib](https://github.com/user/mllib)\n"
+        encoded = base64.b64encode(readme.encode()).decode()
+        client.get_json = AsyncMock(
+            return_value={"content": encoded, "encoding": "base64"},
+        )
+
+        channel = CuratedChannel(client)
+        query = DiscoveryQuery(query="machine learning framework", topics=["machine-learning"])
+        result = await channel.search(query)
+
+        assert isinstance(result, ChannelResult)
+        assert len(result.candidates) >= 1
+        call_url = client.get_json.call_args[0][0]
+        assert "josephmisiti/awesome-machine-learning" in call_url
