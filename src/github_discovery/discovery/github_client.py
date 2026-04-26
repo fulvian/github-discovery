@@ -17,9 +17,21 @@ from typing import Any
 
 import httpx
 import structlog
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from github_discovery.config import GitHubSettings  # noqa: TC001
-from github_discovery.exceptions import RateLimitError
+from github_discovery.exceptions import (
+    GitHubAuthError,
+    GitHubFetchError,
+    GitHubRateLimitError,
+    GitHubServerError,
+    RateLimitError,
+)
 
 logger = structlog.get_logger("github_discovery.discovery.github_client")
 
@@ -38,7 +50,12 @@ _RETRY_MAX_WAIT = 60.0  # Max seconds to wait between retries
 _JITTER_FACTOR = 0.5  # Random jitter: ±50% of wait time
 
 # HTTP status codes
+_HTTP_OK_MIN = 200
+_HTTP_OK_MAX = 300
+_HTTP_UNAUTHORIZED = 401
 _HTTP_FORBIDDEN = 403
+_HTTP_TOO_MANY_REQUESTS = 429
+_HTTP_SERVER_ERROR_MIN = 500
 _HTTP_NOT_MODIFIED = 304
 
 # Regex to parse Link header
@@ -551,6 +568,82 @@ class GitHubRestClient:
     async def close(self) -> None:
         """Close the underlying httpx client."""
         await self._client.aclose()
+
+    @staticmethod
+    def _map_status_error(response: httpx.Response) -> GitHubFetchError | None:  # noqa: PLR0911
+        """Map HTTP status code to typed exception.
+
+        Returns a typed exception for non-2xx status codes, or None for 2xx.
+        """
+        if _HTTP_OK_MIN <= response.status_code < _HTTP_OK_MAX:
+            return None
+        if response.status_code == _HTTP_UNAUTHORIZED:
+            return GitHubAuthError(
+                f"Authentication failed: {response.text[:200]}",
+                status_code=_HTTP_UNAUTHORIZED,
+                url=str(response.url),
+            )
+        if response.status_code == _HTTP_FORBIDDEN:
+            retry_after = response.headers.get("Retry-After")
+            retry_after_int = int(retry_after) if retry_after else None
+            if "rate limit" in response.text.lower() or retry_after is not None:
+                return GitHubRateLimitError(
+                    f"Rate limited: {response.text[:200]}",
+                    retry_after=retry_after_int,
+                    status_code=_HTTP_FORBIDDEN,
+                    url=str(response.url),
+                )
+            return GitHubAuthError(
+                f"Forbidden: {response.text[:200]}",
+                status_code=_HTTP_FORBIDDEN,
+                url=str(response.url),
+            )
+        if response.status_code == _HTTP_TOO_MANY_REQUESTS:
+            retry_after = response.headers.get("Retry-After")
+            retry_after_int = int(retry_after) if retry_after else None
+            return GitHubRateLimitError(
+                f"Too many requests: {response.text[:200]}",
+                retry_after=retry_after_int,
+                status_code=_HTTP_TOO_MANY_REQUESTS,
+                url=str(response.url),
+            )
+        if response.status_code >= _HTTP_SERVER_ERROR_MIN:
+            return GitHubServerError(
+                f"Server error {response.status_code}: {response.text[:200]}",
+                status_code=response.status_code,
+                url=str(response.url),
+            )
+        return GitHubFetchError(
+            f"HTTP {response.status_code}: {response.text[:200]}",
+            status_code=response.status_code,
+            url=str(response.url),
+        )
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential_jitter(initial=1, max=30),
+        retry=retry_if_exception_type((GitHubRateLimitError, GitHubServerError)),
+        reraise=True,
+    )
+    async def _tenacity_fetch(
+        self,
+        url: str,
+        *,
+        params: dict[str, str | int] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Fetch with tenacity retry on rate limit and server errors.
+
+        Maps HTTP status codes to typed exceptions before raising,
+        so tenacity only retries on retryable error types.
+        """
+        response = await self._client.get(url, params=params, headers=headers)
+        await self._track_rate_limits(response)
+
+        typed_error = self._map_status_error(response)
+        if typed_error is not None:
+            raise typed_error
+        return response
 
     async def __aenter__(self) -> GitHubRestClient:
         """Enter async context."""

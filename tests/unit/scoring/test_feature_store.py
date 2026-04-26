@@ -102,12 +102,12 @@ class TestFeatureStoreTTL:
         result = _make_score_result(full_name="test/expired")
         await feature_store.put(result)
 
-        # Manually update scored_at to be expired
+        # Manually update expires_at to be in the past
         db = feature_store._db
         assert db is not None
-        expired_time = (datetime.now(UTC) - timedelta(hours=50)).isoformat()
+        expired_time = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         await db.execute(
-            "UPDATE score_features SET scored_at = ? WHERE full_name = ?",
+            "UPDATE score_features SET expires_at = ? WHERE full_name = ?",
             (expired_time, "test/expired"),
         )
         await db.commit()

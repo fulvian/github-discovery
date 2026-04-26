@@ -24,6 +24,8 @@ logger = structlog.get_logger("github_discovery.scoring.cross_domain")
 
 
 _MIN_STD = 0.001
+_MIN_DOMAIN_SIZE = 3
+_NEAR_UNIFORM_STD = 0.05
 
 
 class CrossDomainGuard:
@@ -48,6 +50,9 @@ class CrossDomainGuard:
         If all repos are same domain → direct comparison (no warning).
         If mixed domains → normalized comparison with warning.
 
+        Z-score normalization is skipped for domains with fewer than
+        3 repos or where the standard deviation is below 0.05 (near-uniform).
+
         Args:
             results: ScoreResults to compare.
 
@@ -71,33 +76,50 @@ class CrossDomainGuard:
         # Compute domain summaries
         domain_summaries = self._compute_domain_summaries(results)
 
+        # Determine if we should skip z-score normalization
+        skip_domains = self._get_skip_domains(domain_summaries)
+        if skip_domains and is_cross_domain and self._settings.cross_domain_warning:
+            skipped_names = ", ".join(sorted(skip_domains))
+            warnings.append(
+                f"Z-score normalization skipped for domain(s) [{skipped_names}]: "
+                "fewer than 3 repos or near-uniform scores (std < 0.05)."
+            )
+
         # Normalize scores
-        normalized = self._normalize_scores(results, domain_summaries)
+        normalized = self._normalize_scores(results, domain_summaries, skip_domains)
 
         # Sort by normalized value_score descending
         normalized.sort(key=lambda n: (-n.normalized_value_score, n.full_name))
+
+        # Compute confidence: fraction of domains that were normalized
+        total_domains = len(domain_summaries)
+        normalized_domains = total_domains - len(skip_domains)
+        confidence = normalized_domains / total_domains if total_domains > 0 else 0.0
 
         return CrossDomainComparison(
             results=normalized,
             is_cross_domain=is_cross_domain,
             warnings=warnings,
             domain_summaries=domain_summaries,
+            cross_domain_confidence=confidence,
         )
 
     def _normalize_scores(
         self,
         results: list[ScoreResult],
         domain_summaries: dict[str, dict[str, float]],
+        skip_domains: set[str] | None = None,
     ) -> list[NormalizedScore]:
         """Normalize scores relative to domain mean.
 
         For each domain:
-        1. Compute domain mean quality_score
-        2. normalized = (quality_score - domain_mean) / domain_std + 0.5
+        1. If domain is in skip_domains → use original quality (no z-score)
+        2. Otherwise: normalized = (quality_score - domain_mean) / domain_std + 0.5
 
         This centers each domain around 0.5 with relative positioning.
         """
         normalized: list[NormalizedScore] = []
+        _skip = skip_domains or set()
 
         for r in results:
             domain_key = r.domain.value
@@ -105,19 +127,24 @@ class CrossDomainGuard:
             mean = stats.get("mean", 0.5)
             std = stats.get("std", 0.1)
 
-            # Avoid division by zero
-            safe_std = std if std > _MIN_STD else 0.1
+            if domain_key in _skip:
+                # Skip z-score — use original quality score directly
+                norm_quality = max(0.0, min(1.0, r.quality_score))
+                norm_vs = max(0.0, min(1.0, r.value_score))
+            else:
+                # Avoid division by zero
+                safe_std = std if std > _MIN_STD else 0.1
 
-            norm_quality = (r.quality_score - mean) / safe_std + 0.5
-            norm_quality = max(0.0, min(1.0, norm_quality))
+                norm_quality = (r.quality_score - mean) / safe_std + 0.5
+                norm_quality = max(0.0, min(1.0, norm_quality))
 
-            # Normalize value_score similarly
-            vs_mean = stats.get("vs_mean", 0.2)
-            vs_std = stats.get("vs_std", 0.05)
-            safe_vs_std = vs_std if vs_std > _MIN_STD else 0.05
+                # Normalize value_score similarly
+                vs_mean = stats.get("vs_mean", 0.2)
+                vs_std = stats.get("vs_std", 0.05)
+                safe_vs_std = vs_std if vs_std > _MIN_STD else 0.05
 
-            norm_vs = (r.value_score - vs_mean) / safe_vs_std + 0.5
-            norm_vs = max(0.0, min(1.0, norm_vs))
+                norm_vs = (r.value_score - vs_mean) / safe_vs_std + 0.5
+                norm_vs = max(0.0, min(1.0, norm_vs))
 
             normalized.append(
                 NormalizedScore(
@@ -133,6 +160,24 @@ class CrossDomainGuard:
             )
 
         return normalized
+
+    @staticmethod
+    def _get_skip_domains(
+        domain_summaries: dict[str, dict[str, float]],
+    ) -> set[str]:
+        """Identify domains where z-score normalization should be skipped.
+
+        Skip when:
+        - Domain has fewer than 3 repos (N < 3)
+        - Domain has near-uniform scores (std < 0.05)
+        """
+        skip: set[str] = set()
+        for domain_key, stats in domain_summaries.items():
+            count = int(stats.get("count", 0))
+            std = stats.get("std", 0.0)
+            if count < _MIN_DOMAIN_SIZE or std < _NEAR_UNIFORM_STD:
+                skip.add(domain_key)
+        return skip
 
     def _compute_domain_summaries(
         self,

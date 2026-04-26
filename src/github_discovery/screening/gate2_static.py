@@ -20,6 +20,8 @@ from __future__ import annotations
 import asyncio
 import shutil
 import tempfile
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -49,6 +51,47 @@ logger = structlog.get_logger("github_discovery.screening.gate2")
 _FALLBACK_SCORE = 0.3
 _FALLBACK_CONFIDENCE = 0.0
 _CLONE_TIMEOUT = 120.0
+_DEFAULT_CLONE_PREFIX = "ghdisc_"
+
+
+def cleanup_orphan_clones(
+    prefix: str = _DEFAULT_CLONE_PREFIX,
+    max_age_hours: float = 6.0,
+) -> int:
+    """Remove orphaned clone directories older than max_age_hours.
+
+    Scans the system temp directory for directories matching the given
+    prefix and removes those older than max_age_hours.
+
+    Args:
+        prefix: Directory name prefix to match (default: 'ghdisc_').
+        max_age_hours: Maximum age in hours before cleanup (default: 6.0).
+
+    Returns:
+        Number of directories removed.
+    """
+    removed = 0
+    tmp_dir = Path(tempfile.gettempdir())
+    cutoff = time.time() - (max_age_hours * 3600)
+
+    for entry in tmp_dir.iterdir():
+        if entry.is_dir() and entry.name.startswith(prefix):
+            try:
+                mtime = entry.stat().st_mtime
+                if mtime < cutoff:
+                    shutil.rmtree(entry, ignore_errors=True)
+                    removed += 1
+                    logger.info(
+                        "orphan_clone_cleaned",
+                        path=str(entry),
+                        age_hours=(time.time() - mtime) / 3600,
+                    )
+            except OSError:
+                logger.debug("orphan_clone_skip", path=str(entry))
+
+    if removed > 0:
+        logger.info("orphan_clone_cleanup_complete", removed=removed)
+    return removed
 
 
 class Gate2StaticScreener:

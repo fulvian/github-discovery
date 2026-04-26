@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS score_features (
     dimension_scores TEXT NOT NULL DEFAULT '{}',
     scored_at TEXT NOT NULL,
     ttl_hours INTEGER NOT NULL DEFAULT 48,
+    expires_at TEXT,
     PRIMARY KEY (full_name, commit_sha)
 );
 
@@ -48,6 +49,17 @@ CREATE INDEX IF NOT EXISTS idx_score_features_domain
     ON score_features(domain);
 CREATE INDEX IF NOT EXISTS idx_score_features_scored_at
     ON score_features(scored_at);
+"""
+
+# Indexes added post-migration (require expires_at column)
+_POST_MIGRATION_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_score_features_expires_at
+    ON score_features(expires_at);
+"""
+
+# Migration SQL: add expires_at column to existing databases
+_MIGRATION_SQL = """
+ALTER TABLE score_features ADD COLUMN expires_at TEXT;
 """
 
 
@@ -84,6 +96,12 @@ class FeatureStore:
             self._db = await aiosqlite.connect(self._db_path)
             self._db.row_factory = aiosqlite.Row
             await self._db.executescript(_CREATE_TABLE_SQL)
+            # Run migration for existing databases missing expires_at column
+            with contextlib.suppress(Exception):
+                await self._db.execute(_MIGRATION_SQL)
+            # Create index on expires_at (safe after migration)
+            with contextlib.suppress(Exception):
+                await self._db.executescript(_POST_MIGRATION_INDEX_SQL)
             await self._db.commit()
         return self._db
 
@@ -98,19 +116,17 @@ class FeatureStore:
     ) -> ScoreResult | None:
         """Get cached score result. Returns None if not found or expired."""
         db = await self._get_db()
+        now_iso = datetime.now(UTC).isoformat()
         cursor = await db.execute(
-            "SELECT * FROM score_features WHERE full_name = ? AND commit_sha = ?",
-            (full_name, commit_sha),
+            (
+                "SELECT * FROM score_features "
+                "WHERE full_name = ? AND commit_sha = ? "
+                "AND (expires_at IS NULL OR expires_at > ?)"
+            ),
+            (full_name, commit_sha, now_iso),
         )
         row = await cursor.fetchone()
         if row is None:
-            return None
-
-        # Check TTL
-        scored_at = datetime.fromisoformat(row["scored_at"])
-        ttl_hours = row["ttl_hours"]
-        expiry = scored_at + timedelta(hours=ttl_hours)
-        if datetime.now(UTC) > expiry:
             return None
 
         return self._row_to_result(row)
@@ -120,13 +136,18 @@ class FeatureStore:
         db = await self._get_db()
         dim_json = self._serialize_dimensions(result.dimension_scores)
 
+        # Compute expires_at from scored_at + ttl
+        scored_at_dt = result.scored_at
+        expires_at_dt = scored_at_dt + timedelta(hours=self._ttl_hours)
+        expires_at_iso = expires_at_dt.isoformat()
+
         await db.execute(
             """
             INSERT OR REPLACE INTO score_features
                 (full_name, commit_sha, domain, quality_score, value_score,
                  confidence, stars, gate1_total, gate2_total, gate3_available,
-                 dimension_scores, scored_at, ttl_hours)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 dimension_scores, scored_at, ttl_hours, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 result.full_name,
@@ -142,6 +163,7 @@ class FeatureStore:
                 dim_json,
                 result.scored_at.isoformat(),
                 self._ttl_hours,
+                expires_at_iso,
             ),
         )
         await db.commit()
@@ -181,6 +203,7 @@ class FeatureStore:
                 self._serialize_dimensions(result.dimension_scores),
                 result.scored_at.isoformat(),
                 self._ttl_hours,
+                (result.scored_at + timedelta(hours=self._ttl_hours)).isoformat(),
             )
             for result in results
         ]
@@ -189,8 +212,8 @@ class FeatureStore:
             INSERT OR REPLACE INTO score_features
                 (full_name, commit_sha, domain, quality_score, value_score,
                  confidence, stars, gate1_total, gate2_total, gate3_available,
-                 dimension_scores, scored_at, ttl_hours)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 dimension_scores, scored_at, ttl_hours, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -222,6 +245,47 @@ class FeatureStore:
         removed = cursor.rowcount
         if removed > 0:
             logger.info("feature_store_cleanup", removed=removed)
+        return removed
+
+    async def prune_expired(self, dry_run: bool = False) -> int:
+        """Remove entries past their expires_at timestamp.
+
+        Uses the expires_at column for precise expiry. Falls back to
+        scored_at + ttl_hours for rows where expires_at is NULL.
+
+        Args:
+            dry_run: If True, count but don't delete.
+
+        Returns:
+            Number of expired entries (deleted or counted).
+        """
+        db = await self._get_db()
+        now_iso = datetime.now(UTC).isoformat()
+
+        if dry_run:
+            cursor = await db.execute(
+                (
+                    "SELECT COUNT(*) as cnt FROM score_features "
+                    "WHERE (expires_at IS NOT NULL AND expires_at <= ?) "
+                    "OR (expires_at IS NULL AND scored_at < ?)"
+                ),
+                (now_iso, (datetime.now(UTC) - timedelta(hours=self._ttl_hours)).isoformat()),
+            )
+            row = await cursor.fetchone()
+            return row["cnt"] if row else 0
+
+        cursor = await db.execute(
+            (
+                "DELETE FROM score_features "
+                "WHERE (expires_at IS NOT NULL AND expires_at <= ?) "
+                "OR (expires_at IS NULL AND scored_at < ?)"
+            ),
+            (now_iso, (datetime.now(UTC) - timedelta(hours=self._ttl_hours)).isoformat()),
+        )
+        await db.commit()
+        removed = cursor.rowcount
+        if removed > 0:
+            logger.info("feature_store_prune_expired", removed=removed)
         return removed
 
     async def get_stats(self) -> FeatureStoreStats:
