@@ -3,7 +3,7 @@ Title: Phase 5 Scoring & Ranking Implementation
 Topic: patterns
 Sources: Roadmap Phase 5; Blueprint §7 (Layer D), §10 (Domain Strategy), §3 (Star-Neutral Quality); Phase 5 implementation plan; Star-neutral redesign (2026-04-25)
 Raw: [roadmap.md](../../../roadmaps/github-discovery_foundation_roadmap.md); [blueprint.md](../../../foundation/github-discovery_foundation_blueprint.md); [phase5-plan.md](../../../plans/phase5-implementation-plan.md)
-Updated: 2026-04-25
+Updated: 2026-04-26
 Confidence: high
 ---
 
@@ -11,8 +11,8 @@ Confidence: high
 
 Phase 5 implements Layer D (Scoring & Ranking) — the final pipeline stage that combines Gate 1+2+3 outputs into composite multi-dimensional scores, applies domain profiles, computes star-neutral quality scores, and produces ranked, explainable results.
 
-**Status: COMPLETE + VERIFIED + STAR-NEUTRAL REDESIGN** — `make ci` green: ruff + ruff format + mypy --strict + pytest.
-1326 total project tests pass (136 scoring tests).
+**Status: COMPLETE + VERIFIED + STAR-NEUTRAL REDESIGN + FASE 2 AUDIT REMEDIATION** — `make ci` green: ruff + ruff format + mypy --strict + pytest.
+1515 total project tests pass (168 scoring tests).
 
 ## Star-Neutral Redesign (2026-04-25)
 
@@ -37,8 +37,36 @@ The scoring system was redesigned from anti-star bias to star-neutral:
 - `_CORROBORATION_UNVALIDATED = 50`
 - `_CORROBORATION_EMERGING = 500`
 - `_CORROBORATION_VALIDATED = 5000`
-- `_HIDDEN_GEM_MAX_STARS = 100`
-- `_HIDDEN_GEM_MIN_QUALITY = 0.5`
+- `_HIDDEN_GEM_MAX_STARS` and `_HIDDEN_GEM_MIN_QUALITY` **removed in Fase 2 Wave 1 (T1.1)** — now uses `ScoringSettings` as single source of truth
+
+## Fase 2 Audit Remediation (2026-04-26)
+
+Post-independent audit by 4 LLM auditors (Claude, Gemini, ChatGPT, Perplexity). Average scoring logic rating: 5.5–6.5/10. Fase 2 addresses all critical and high-priority issues.
+
+### Wave 1 — P0 Critical Bugs (T1.1–T1.4)
+
+- **T1.1 — Single-source hidden_gem thresholds**: Removed `_HIDDEN_GEM_MAX_STARS=100` and `_HIDDEN_GEM_MIN_QUALITY=0.5` from `models/scoring.py`. `ScoreResult.is_hidden_gem` now reads `ScoringSettings` defaults (star_threshold=500, min_quality=0.7). Added `is_hidden_gem` computed_field to `RankedRepo`.
+- **T1.2 — Deterministic tie-breaking**: Replaced `hash()` with `hashlib.blake2b(digest_size=8)` in `Ranker._seeded_hash()`. Cross-process deterministic regardless of `PYTHONHASHSEED`.
+- **T1.3 — Coverage field + quality damping**: Added `coverage: float` and `raw_quality_score: float` to `ScoreResult`. `_apply_weights()` returns `tuple[float, float]` (raw_score, coverage). Quality damping: `quality_score = raw * (0.5 + 0.5 * coverage)`.
+- **T1.4 — Stricter SubScore validators**: `SubScore.weight`: `gt=0.0` → `ge=0.0, le=10.0`. `SubScore.details`: `dict[str, object]` → `dict[str, str | int | float | bool | None]` (JSON-compatible). Fixed 7 screening modules for type compatibility.
+
+### Wave 2 — Scoring Logic Hardening (T2.1–T2.5)
+
+- **T2.1 — Revised `_DERIVATION_MAP`**: ARCHITECTURE now empty (not derivable from Gate 1+2). CODE_QUALITY rebalanced to weight product (complexity, test) over process (review). DOCUMENTATION removed review_practice, added release_discipline. All non-empty derivation weights sum to 1.0.
+- **T2.2 — Weighted confidence**: `ConfidenceCalculator.compute()` accepts optional `profile` parameter. When provided: weighted average using profile dimension weights instead of simple average. Missing critical dimension penalty: -0.10 if any dimension with profile weight ≥ 0.15 has confidence 0.0.
+- **T2.3 — Per-dimension confidence**: New `_DIMENSION_CONFIDENCE_FROM_GATE12` map: TESTING=0.55, MAINTENANCE=0.50, SECURITY=0.50, DOCUMENTATION=0.40, CODE_QUALITY=0.40, ARCHITECTURE/FUNCTIONALITY/INNOVATION=0.0.
+- **T2.4 — HeuristicFallback model**: New `HeuristicFallback` in `assessment/types.py` with confidence capped at 0.25. Explicit ignorance signal: `note` warns "LLM unavailable; heuristic fallback only — interpret with caution".
+- **T2.5 — Path-based test detection**: `_extract_file_paths()` parses Repomix file headers. `_has_test_dir()` checks file paths against known test directories. Prevents false positives from README prose mentions.
+
+### T5.5 — Property-Based Tests (Hypothesis)
+
+11 Hypothesis-based tests covering 1000+ generated inputs:
+- ScoreResult bounds: quality_score, confidence, coverage ∈ [0,1]
+- Star neutrality: value_score == quality_score regardless of stars
+- Coverage damping: quality_score ≤ raw_quality_score when coverage < 1
+- Profile weight sum: all 12 domain profiles sum to ~1.0
+- Profile completeness: all profiles cover all 8 dimensions
+- Determinism: identical inputs produce identical outputs
 
 ## Key Architecture Decisions
 
@@ -67,8 +95,10 @@ The scoring system was redesigned from anti-star bias to star-neutral:
 ### ConfidenceCalculator: Per-Dimension Confidence
 
 - Per-dimension confidence based on which gate provided the signal
+- **Variable confidence per dimension (T2.3)**: `_DIMENSION_CONFIDENCE_FROM_GATE12` map — TESTING=0.55, MAINTENANCE=0.50, SECURITY=0.50, DOCUMENTATION=0.40, CODE_QUALITY=0.40, non-derivable dims=0.0
 - Gate coverage bonus: confidence boost when all gates are represented
-- Overall confidence: weighted average of dimension confidences
+- **Weighted average (T2.2)**: when profile provided, uses profile dimension weights instead of simple average
+- **Missing critical dimension penalty (T2.2)**: -0.10 if any dim with weight ≥ 0.15 has confidence 0.0
 
 ### Ranker: Intra-Domain Star-Neutral Ranking
 
@@ -142,10 +172,12 @@ Added to `config.py` with env prefix `GHDISC_SCORING_`:
 
 ## Test Coverage
 
-- 136 unit tests across 9 test files in `tests/unit/scoring/`
-- 10 new tests added for star-neutral redesign:
-  - `TestCorroborationLevel` (5 tests): new, unvalidated, emerging, validated, widely_adopted
-  - `TestIsHiddenGem` (5 tests): high quality + low stars, high quality + high stars, low quality, boundary quality, boundary stars
+- 168 unit tests across 13 test files in `tests/unit/scoring/`
+- Phase 5 original: 136 tests across 9 files
+- Star-neutral redesign: +10 tests (corroboration, hidden gem, value_score)
+- Fase 2 Wave 1: +120 tests (hidden_gem_consistency=112, deterministic_ranking=4, coverage_field=5, -1 updated)
+- Fase 2 Wave 2: +36 tests (scoring_hardening=24, heuristic_hardening=12)
+- T5.5 Hypothesis: +11 property-based tests (1000+ generated inputs)
 - Updated tests:
   - `test_value_score.py`: rewritten for star-neutral expectations
   - `test_scoring.py`: rewritten with pytest import, new test classes

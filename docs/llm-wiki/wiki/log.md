@@ -665,3 +665,43 @@ This was NOT a real evaluation — it was a silent failure from not respecting G
 - **Verification**: `kilo mcp list` from `/home/fulvio/coding/aria` → ✓ github-discovery connected (was ✗ failed before)
 - **Created**: `docs/llm-wiki/wiki/patterns/env-isolation-resilience.md` — full analysis and design principle
 - **Updated**: `docs/llm-wiki/wiki/index.md` — added new page entry
+
+## [2026-04-26] ingest | Fase 2 Audit Remediation — Wave 1+2+T5.5 Complete
+
+### Overview
+Fase 2 addresses findings from an independent 4-LLM audit of the scoring pipeline. Goal: defensible scoring, deterministic ranking, single-source-of-truth constants, and empirical calibration.
+
+### Wave 1 — P0 Critical Bugs (commit `629b603`)
+- **T1.1**: Removed `_HIDDEN_GEM_MAX_STARS`/`_HIDDEN_GEM_MIN_QUALITY` from `models/scoring.py`. `ScoreResult.is_hidden_gem` reads `ScoringSettings` as single source of truth. Added `is_hidden_gem` to `RankedRepo`.
+- **T1.2**: Replaced `hash()` with `hashlib.blake2b(digest_size=8)` in `Ranker._seeded_hash()`. Cross-process deterministic.
+- **T1.3**: Added `coverage: float` and `raw_quality_score: float` to `ScoreResult`. Quality damping: `quality_score = raw * (0.5 + 0.5 * coverage)`.
+- **T1.4**: `SubScore.weight`: `ge=0.0, le=10.0`. `SubScore.details`: `dict[str, str|int|float|bool|None]`. Fixed 7 screening modules.
+- 112 new tests (test_hidden_gem_consistency.py, test_deterministic_ranking.py, test_coverage_field.py)
+
+### Wave 2 — Scoring Logic Hardening (commit `7881489`)
+- **T2.1**: `_DERIVATION_MAP` revised: ARCHITECTURE empty, CODE_QUALITY rebalanced (complexity=0.35, test_footprint=0.25, review_practice=0.25, ci_cd=0.15), DOCUMENTATION uses release_discipline.
+- **T2.2**: `ConfidenceCalculator.compute()` accepts `profile` for weighted average + missing critical dimension penalty (-0.10).
+- **T2.3**: `_DIMENSION_CONFIDENCE_FROM_GATE12` per-dimension map (TESTING=0.55, MAINTENANCE=0.50, SECURITY=0.50, DOC=0.40, CODE_QUALITY=0.40, ARCH/FUNC/INNOV=0.0).
+- **T2.4**: New `HeuristicFallback` model with confidence capped at 0.25.
+- **T2.5**: `_extract_file_paths()` + `_has_test_dir()` for Repomix header-based detection, fallback to pattern matching.
+- 36 new tests (test_scoring_hardening.py, test_heuristic_hardening.py)
+
+### T5.5 Property-Based Tests (commit `71c925b`)
+- 11 Hypothesis tests covering 1000+ generated inputs for scoring invariants.
+- Tests: score bounds, weight sum, confidence bounds, rank determinism, hidden gem consistency, coverage damping.
+
+### CI Status
+- 1326 → 1515 tests (+189)
+- ruff ✅ | mypy --strict ✅ | pytest 1515/1515 ✅
+
+### Wiki Updates
+- Updated wiki/patterns/phase5-scoring-implementation.md with Fase 2 sections
+- Updated wiki/domain/scoring-dimensions.md with derivation map, per-dimension confidence, coverage damping, ScoringSettings hidden gem
+- Updated wiki/architecture/anti-star-bias.md with ScoringSettings single-source, blake2b tie-breaking
+- Updated wiki/index.md with refreshed dates and descriptions
+- Updated wiki/log.md (this entry)
+
+### Remaining Fase 2 Work
+- **Wave 3** (T3.1–T3.7): Robustness & Resource Safety — NOT STARTED
+- **Wave 4** (T4.1–T4.4): Empirical Calibration — NOT STARTED (external labeling)
+- **Wave 5** (T5.1–T5.4): Architectural Refactor — NOT STARTED (T5.5 done)

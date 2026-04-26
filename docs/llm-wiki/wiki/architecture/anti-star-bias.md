@@ -1,9 +1,9 @@
 ---
 Title: Star-Neutral Quality Scoring
 Topic: architecture
-Sources: Foundation Blueprint §3, §5, §7; Findings §1; E2E validation (2026-04-25)
+Sources: Foundation Blueprint §3, §5, §7; Findings §1; E2E validation (2026-04-25); Fase 2 Audit Remediation (2026-04-26)
 Raw: [blueprint.md](../../../foundation/github-discovery_foundation_blueprint.md); [findings.md](../../../../findings.md)
-Updated: 2026-04-25
+Updated: 2026-04-26
 Confidence: high
 ---
 
@@ -44,10 +44,12 @@ These levels are informational only — they never change the quality_score or r
 ## Hidden Gem Detection
 
 A repo is flagged as a **hidden gem** when:
-- `quality_score >= 0.5` (meaningful technical quality)
-- `stars < 100` (low visibility)
+- `quality_score >= 0.7` (meaningful technical quality — from `ScoringSettings.hidden_gem_min_quality`)
+- `stars < 500` (low visibility — from `ScoringSettings.hidden_gem_star_threshold`)
 
 This is an **informational label** — it does NOT affect ranking, does NOT boost or reduce any score, and is displayed as metadata alongside the quality score.
+
+**Fase 2 T1.1 fix (2026-04-26)**: Previously, `models/scoring.py` had hardcoded `_HIDDEN_GEM_MAX_STARS=100` and `_HIDDEN_GEM_MIN_QUALITY=0.5` that diverged from `ScoringSettings` defaults (`hidden_gem_star_threshold=500`, `hidden_gem_min_quality=0.7`). The model-level constants were removed — `ScoreResult.is_hidden_gem` now reads `ScoringSettings` as the **single source of truth**. The `RankedRepo` model also gained an `is_hidden_gem` field to propagate the label through the ranking pipeline.
 
 ## Domain-Awareness
 
@@ -71,8 +73,11 @@ Star-neutral scoring is implemented across multiple modules:
 ### `models/scoring.py` — ScoreResult
 - `value_score` computed_field: returns `quality_score` (star-neutral)
 - `corroboration_level` computed_field: classifies stars into informational buckets
-- `is_hidden_gem` computed_field: informational label (quality ≥ 0.5 AND stars < 100)
-- Constants: `_CORROBORATION_UNVALIDATED=50`, `_CORROBORATION_EMERGING=500`, `_CORROBORATION_VALIDATED=5000`, `_HIDDEN_GEM_MAX_STARS=100`, `_HIDDEN_GEM_MIN_QUALITY=0.5`
+- `is_hidden_gem` computed_field: informational label — reads `ScoringSettings` as single source of truth (quality ≥ 0.7 AND stars < 500 by default)
+- `coverage: float` — fraction of dimensions with non-zero scores (Fase 2 T1.3)
+- `raw_quality_score: float` — quality before coverage damping (Fase 2 T1.3)
+- Constants: `_CORROBORATION_UNVALIDATED=50`, `_CORROBORATION_EMERGING=500`, `_CORROBORATION_VALIDATED=5000`
+- **Removed** (Fase 2 T1.1): `_HIDDEN_GEM_MAX_STARS`, `_HIDDEN_GEM_MIN_QUALITY` — now in `ScoringSettings` only
 
 ### `scoring/value_score.py` — ValueScoreCalculator
 - `compute()`: returns `quality_score` unchanged (stars explicitly unused)
@@ -82,6 +87,7 @@ Star-neutral scoring is implemented across multiple modules:
 
 ### `scoring/ranker.py` — Ranker
 - Sort key: `(-quality_score, -confidence, -seeded_hash, full_name)`
+- `seeded_hash` uses `hashlib.blake2b(digest_size=8)` for cross-process determinism (Fase 2 T1.2)
 - Stars are NOT part of the sort key
 - Hidden gem detection uses `quality_score` (not `value_score`)
 
