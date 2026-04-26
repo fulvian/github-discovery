@@ -220,24 +220,28 @@ def register_assessment_tools(mcp: FastMCP, settings: Settings) -> None:
                 )
             candidate = candidates[0]
 
-            # Run screening first (hard gate enforcement)
-            # Gate 1+2 is required before Gate 3 (Blueprint §16.5)
+            # Run Gate 1 screening only (metadata — no clone needed).
+            # quick_assess is designed for fast, ad-hoc checks; requiring
+            # Gate 2 (clone + gitleaks/scc) would defeat the "quick" purpose.
+            # Full hard gate (Gate 1+2) is enforced by screen_candidates → deep_assess.
             screening_results = await _screen_for_hard_gate(
                 app_ctx,
                 [candidate],
+                gate_level=GateLevel.METADATA,
             )
             screening = screening_results.get(full_name)
 
-            if screening is None or not screening.can_proceed_to_gate3:
-                gate1_pass = screening.gate1.gate1_pass if screening and screening.gate1 else False
-                gate2_pass = screening.gate2.gate2_pass if screening and screening.gate2 else False
+            if screening is None or screening.gate1 is None or not screening.gate1.gate1_pass:
+                gate1_total = screening.gate1.gate1_total if screening and screening.gate1 else 0.0
+                gate1_threshold = (
+                    screening.gate1.threshold_used if screening and screening.gate1 else 0.4
+                )
                 return format_tool_result(
                     success=False,
                     error_message=(
-                        f"Gate 1+2 hard gate blocked assessment for {full_name}. "
-                        f"Gate1={'pass' if gate1_pass else 'fail'}, "
-                        f"Gate2={'pass' if gate2_pass else 'fail'}. "
-                        f"Use screen_candidates or quick_screen first for details."
+                        f"Gate 1 blocked assessment for {full_name}. "
+                        f"Score={gate1_total:.3f}, threshold={gate1_threshold:.3f}. "
+                        f"Use quick_screen for detailed sub-score breakdown."
                     ),
                 )
 
@@ -373,8 +377,13 @@ async def _enrich_from_github_api(
         RepoCandidate with enriched metadata or minimal fallback.
     """
     try:
-        # Use the discovery orchestrator's REST client for GitHub API access
-        rest_client = app_ctx.discovery_orch._rest_client
+        # Use the lifespan-managed REST client from AppContext.
+        # This is the same client shared across all MCP tools — avoids
+        # reaching into DiscoveryOrchestrator's private internals.
+        rest_client = app_ctx._rest_client
+        if rest_client is None:
+            raise RuntimeError("REST client not initialized in AppContext")
+
         repo_data = await rest_client.get_json(f"/repos/{full_name}")
 
         if isinstance(repo_data, dict):

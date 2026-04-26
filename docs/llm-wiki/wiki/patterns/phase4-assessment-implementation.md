@@ -210,3 +210,30 @@ Real E2E testing revealed 5 bugs in the assessment and screening pipeline. All f
 - 1601 tests passing (was 1599 before BUG 1 fix updates, +2 new curated channel tests)
 - 0 lint errors, 0 type errors
 - 6 files changed, 347 insertions, 78 deletions
+
+## Pipeline Bug Fixes Round 2 (2026-04-27)
+
+Post-fix E2E re-testing revealed 3 additional bugs. All fixed.
+
+### BUG 6: quick_assess requires Gate 1+2 (too slow for "quick" tool)
+
+- **File**: `mcp/tools/assessment.py`
+- **Root cause**: `quick_assess` called `_screen_for_hard_gate()` with default `GateLevel.STATIC_SECURITY` (Gate 1+2). Gate 2 clones the repo + runs gitleaks/scc — too slow for a "quick" tool. Inconsistent with `deep_assess` (fixed in BUG 3 to use Gate 1 only).
+- **Fix**: Changed to `GateLevel.METADATA` (Gate 1 only). Eligibility check changed from `can_proceed_to_gate3` to `gate1_pass`. Error message now shows Gate 1 score and threshold.
+
+### BUG 7: _enrich_from_github_api accesses private DiscoveryOrchestrator._rest_client
+
+- **File**: `mcp/tools/assessment.py`, `mcp/server.py`
+- **Root cause**: `_enrich_from_github_api()` accessed `app_ctx.discovery_orch._rest_client` — reaching through DiscoveryOrchestrator's private internals. AppContext already has its own `_rest_client` field (set during lifespan), but typed as `object`.
+- **Fix**: Changed to `app_ctx._rest_client` with proper typing (`GitHubRestClient | None`). Added None guard.
+
+### BUG 8: CuratedChannel can't match language from query text
+
+- **File**: `discovery/curated_channel.py`
+- **Root cause**: `_resolve_awesome_lists()` only matched `query.language` (explicit parameter) against `_DEFAULT_AWESOME_LISTS`. Query words only checked `_TOPIC_AWESOME_MAP`. "python" in "static analysis python" was never matched.
+- **Fix**: Extended query word matching to also check `_DEFAULT_AWESOME_LISTS` keys.
+
+### Test impact
+
+- 1604 tests passing (was 1601), 0 lint/type errors
+- 3 new tests: `test_quick_assess_gate1_blocked`, `test_search_matches_language_from_query_text`, `test_search_matches_topic_from_query_text`

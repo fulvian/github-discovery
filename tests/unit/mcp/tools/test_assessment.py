@@ -179,7 +179,7 @@ class TestQuickAssessTool:
         mock_assessment_orchestrator: AsyncMock,
         make_app_ctx,
     ) -> None:
-        """quick_assess returns assessment for single repo."""
+        """quick_assess returns assessment for single repo (Gate 1 only)."""
         app_ctx = make_app_ctx(
             settings,
             mock_session_manager,
@@ -188,7 +188,7 @@ class TestQuickAssessTool:
         mock_ctx = AsyncMock()
         mock_ctx.request_context.lifespan_context = app_ctx
 
-        # Mock screening to return passed results (required by hard gate)
+        # Mock screening — quick_assess uses Gate 1 only (no clone)
         screening_results = {
             "owner/repo-1": ScreeningResult(
                 full_name="owner/repo-1",
@@ -197,11 +197,7 @@ class TestQuickAssessTool:
                     gate1_total=0.7,
                     gate1_pass=True,
                 ),
-                gate2=StaticScreenResult(
-                    full_name="owner/repo-1",
-                    gate2_total=0.6,
-                    gate2_pass=True,
-                ),
+                gate2=None,  # quick_assess skips Gate 2
             ),
         }
 
@@ -225,6 +221,52 @@ class TestQuickAssessTool:
         assert result["success"] is True
         assert result["data"]["repo"] == "owner/repo-1"
         assert "overall_quality" in result["data"]
+
+    async def test_quick_assess_gate1_blocked(
+        self,
+        settings: Settings,
+        mock_session_manager: AsyncMock,
+        make_app_ctx,
+    ) -> None:
+        """quick_assess returns error when Gate 1 fails."""
+        app_ctx = make_app_ctx(settings, mock_session_manager)
+        mock_ctx = AsyncMock()
+        mock_ctx.request_context.lifespan_context = app_ctx
+
+        # Gate 1 fails
+        screening_results = {
+            "owner/repo-1": ScreeningResult(
+                full_name="owner/repo-1",
+                gate1=MetadataScreenResult(
+                    full_name="owner/repo-1",
+                    gate1_total=0.25,
+                    gate1_pass=False,
+                    threshold_used=0.4,
+                ),
+                gate2=None,
+            ),
+        }
+
+        with patch(
+            "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
+            return_value=screening_results,
+        ), patch(
+            "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
+            return_value=[_make_candidate("owner/repo-1")],
+        ):
+            from github_discovery.mcp.server import create_server
+
+            server = create_server(settings)
+            tool_fn = server._tool_manager._tools["quick_assess"].fn
+
+            result = await tool_fn(
+                repo_url="https://github.com/owner/repo-1",
+                ctx=mock_ctx,
+            )
+
+        assert result["success"] is False
+        assert "gate 1" in result["error_message"].lower()
+        assert "0.250" in result["error_message"]
 
 
 class TestGetAssessmentTool:

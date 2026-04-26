@@ -55,6 +55,7 @@ Layer A (Gate 0) of the pipeline discovers candidates through multiple channels 
   - Added `_TOPIC_AWESOME_MAP` for keyword matching (ml, security, testing, devops, etc.)
   - Output capped at `_MAX_CURATED_CANDIDATES = 50` to prevent pool flooding
   - Matches against `query.topics` (explicit) and `query.query` keywords
+  - **Round 2 fix**: Query word matching now also checks `_DEFAULT_AWESOME_LISTS` keys — "python" in "static analysis python" now matches `vinta/awesome-python` even without explicit `query.language`
 
 ### 6. Seed Expansion
 - **Module**: `discovery/seed_expansion.py`

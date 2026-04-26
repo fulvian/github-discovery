@@ -327,3 +327,43 @@ class TestSearch:
         assert len(result.candidates) >= 1
         call_url = client.get_json.call_args[0][0]
         assert "josephmisiti/awesome-machine-learning" in call_url
+
+    async def test_search_matches_language_from_query_text(self) -> None:
+        """Query 'static analysis python' with no explicit language → matches python list."""
+        client = AsyncMock()
+
+        readme = "- [Flask](https://github.com/pallets/flask)\n"
+        encoded = base64.b64encode(readme.encode()).decode()
+        client.get_json = AsyncMock(
+            return_value={"content": encoded, "encoding": "base64"},
+        )
+
+        channel = CuratedChannel(client)
+        # No language set — "python" is embedded in the query text
+        query = DiscoveryQuery(query="static analysis python")
+        result = await channel.search(query)
+
+        assert isinstance(result, ChannelResult)
+        assert len(result.candidates) >= 1
+        # Verify the README API was called for the python awesome list
+        call_url = client.get_json.call_args[0][0]
+        assert "vinta/awesome-python" in call_url
+
+    async def test_search_matches_topic_from_query_text(self) -> None:
+        """Query 'security scanner' with no topics → matches security topic map."""
+        client = AsyncMock()
+
+        readme = "- [Gitleaks](https://github.com/gitleaks/gitleaks)\n"
+        encoded = base64.b64encode(readme.encode()).decode()
+        client.get_json = AsyncMock(
+            return_value={"content": encoded, "encoding": "base64"},
+        )
+
+        channel = CuratedChannel(client)
+        query = DiscoveryQuery(query="security scanner")
+        result = await channel.search(query)
+
+        assert isinstance(result, ChannelResult)
+        assert len(result.candidates) >= 1
+        call_url = client.get_json.call_args[0][0]
+        assert "sbilly/awesome-security" in call_url

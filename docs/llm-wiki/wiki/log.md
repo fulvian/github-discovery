@@ -830,3 +830,34 @@ Real E2E testing of the full discovery pipeline (Gate 0 → Gate 3 → Ranking) 
 - `domain/discovery-channels.md` — added CuratedChannel fix details
 - `index.md` — updated 3 article descriptions
 - `log.md` — this entry
+
+## [2026-04-27] ingest | Pipeline Bug Fixes Round 2 — 3 bugs found in E2E re-testing
+
+### Overview
+After fixing BUG 1-5, re-running the E2E pipeline revealed 3 additional bugs. All fixed, 1604 tests passing.
+
+### BUG 6: quick_assess requires Gate 1+2 (too slow) (HIGH)
+- **File**: `mcp/tools/assessment.py`
+- **Root cause**: `quick_assess` called `_screen_for_hard_gate()` with default `GateLevel.STATIC_SECURITY` (Gate 1+2). Gate 2 clones the repo + runs gitleaks/scc — too slow for a "quick" tool. Inconsistent with `deep_assess` which was already fixed to use Gate 1 only (BUG 3).
+- **Fix**: Changed `quick_assess` to use `GateLevel.METADATA` (Gate 1 only). Eligibility check changed from `can_proceed_to_gate3` (requires Gate 1+2) to `gate1_pass` (Gate 1 only). Error message now shows Gate 1 score and threshold.
+
+### BUG 7: _enrich_from_github_api accesses private attribute (MEDIUM)
+- **File**: `mcp/tools/assessment.py`, `mcp/server.py`
+- **Root cause**: `_enrich_from_github_api()` accessed `app_ctx.discovery_orch._rest_client` — reaching through DiscoveryOrchestrator's private internals. AppContext already has its own `_rest_client` field (set during lifespan), but it was typed as `object`.
+- **Fix**: Changed `_enrich_from_github_api` to use `app_ctx._rest_client`. Typed `AppContext._rest_client` as `GitHubRestClient | None`. Added `GitHubRestClient` to TYPE_CHECKING imports in server.py. Added None guard in the function.
+
+### BUG 8: CuratedChannel can't find language-specific lists from query text (HIGH)
+- **File**: `discovery/curated_channel.py`
+- **Root cause**: `_resolve_awesome_lists()` only matched `query.language` (explicit parameter) against `_DEFAULT_AWESOME_LISTS`. When `discover_repos("static analysis python")` is called, `DiscoveryQuery.language` is None (not extracted from query text). Query word matching only checked `_TOPIC_AWESOME_MAP`, not `_DEFAULT_AWESOME_LISTS`. So "python" in the query was never matched.
+- **Fix**: Extended `_resolve_awesome_lists()` to also check query words against `_DEFAULT_AWESOME_LISTS` keys (step 3 in priority). Now "static analysis python" → matches "python" → resolves to `vinta/awesome-python`.
+
+### Test impact
+- 1604 tests passing (was 1601), 0 lint/type errors
+- New tests: `test_quick_assess_gate1_blocked`, `test_search_matches_language_from_query_text`, `test_search_matches_topic_from_query_text`
+- Updated tests: `test_quick_assess_happy_path` (Gate 2=None, Gate 1 only)
+
+### Note on MCP server
+- Fixes are in source code on disk but require MCP server restart to take effect
+- The running MCP server loads code at startup; subsequent edits don't auto-reload
+- E2E validation confirmed: quick_screen works (Gate 1=0.43 for pytest-dev/pytest), search channel returns results
+- Curated channel still returns old results in the running server (pre-BUG 2 code loaded)

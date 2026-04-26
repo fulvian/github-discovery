@@ -368,8 +368,9 @@ class CuratedChannel:
 
         Priority:
         1. Language match → language-specific awesome list
-        2. Topic/query keyword match → topic-specific awesome list
-        3. No match → empty list (no fallback to mega-list)
+        2. Topic match from query.topics → topic-specific awesome list
+        3. Query word match → language or topic awesome list
+        4. No match → empty list (no fallback to mega-list)
 
         Args:
             query: Discovery query with optional language/topic filter.
@@ -377,26 +378,29 @@ class CuratedChannel:
         Returns:
             List of awesome list GitHub URLs (may be empty).
         """
-        # 1. Language match
+        # 1. Explicit language match
         if query.language and query.language.lower() in _DEFAULT_AWESOME_LISTS:
             return _DEFAULT_AWESOME_LISTS[query.language.lower()]
 
-        # 2. Topic match from query.topics or query keywords
+        # 2. Topic match from explicit topics
         query_words = [w.lower() for w in query.query.replace("-", " ").split()]
 
-        # Check explicit topics first
         if query.topics:
             for topic in query.topics:
                 topic_lower = topic.lower()
                 if topic_lower in _TOPIC_AWESOME_MAP:
                     return _TOPIC_AWESOME_MAP[topic_lower]
+                if topic_lower in _DEFAULT_AWESOME_LISTS:
+                    return _DEFAULT_AWESOME_LISTS[topic_lower]
 
-        # Then check query words against topic map
+        # 3. Query word match against both topic and language maps
         for word in query_words:
             if word in _TOPIC_AWESOME_MAP:
                 return _TOPIC_AWESOME_MAP[word]
+            if word in _DEFAULT_AWESOME_LISTS:
+                return _DEFAULT_AWESOME_LISTS[word]
 
-        # 3. No match — return empty instead of mega-list fallback.
+        # 4. No match — return empty instead of mega-list fallback.
         # This prevents curated channel from flooding the pool with
         # thousands of irrelevant results from sindresorhus/awesome.
         return []

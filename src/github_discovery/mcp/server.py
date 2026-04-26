@@ -23,12 +23,14 @@ from github_discovery.mcp.session import SessionManager
 from github_discovery.mcp.transport import get_transport_args
 
 if TYPE_CHECKING:
+
     from collections.abc import AsyncIterator
 
     from mcp.server.fastmcp import Context
     from mcp.server.session import ServerSession
 
     from github_discovery.assessment.orchestrator import AssessmentOrchestrator
+    from github_discovery.discovery.github_client import GitHubRestClient
     from github_discovery.discovery.orchestrator import DiscoveryOrchestrator
     from github_discovery.discovery.pool import PoolManager
     from github_discovery.scoring.engine import ScoringEngine
@@ -92,8 +94,8 @@ class AppContext:
     scoring_engine: ScoringEngine
     ranker: Ranker
     feature_store: FeatureStore
-    # Track resources that need cleanup
-    _rest_client: object = field(default=None, repr=False)
+    # Shared GitHub REST client for API calls (used by assessment tools)
+    _rest_client: GitHubRestClient | None = field(default=None, repr=False)
 
 
 def get_app_context(ctx: Context[ServerSession, AppContext]) -> AppContext:
