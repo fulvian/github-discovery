@@ -147,9 +147,9 @@ class TestFootprintAnalyzer:
 
         score_val = min(1.0, score_val)
 
-        details: dict[str, object] = {
+        details: dict[str, str | int | float | bool | None] = {
             "has_test_dir": has_test_dir,
-            "test_frameworks": frameworks,
+            "test_frameworks": ", ".join(frameworks),
             "test_file_ratio": round(test_file_ratio, 4),
             "has_conftest": has_conftest_val,
         }

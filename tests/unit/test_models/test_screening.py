@@ -40,13 +40,14 @@ class TestSubScore:
             SubScore(value=-0.1)
 
     def test_score_with_details(self) -> None:
-        """SubScore carries details dict."""
+        """SubScore carries details dict (JSON-compatible values only)."""
         score = SubScore(
             value=0.8,
-            details={"files_found": ["LICENSE", "README.md"]},
+            details={"files_found": "LICENSE, README.md", "count": 2},
             notes=["LICENSE is MIT", "README has content"],
         )
-        assert score.details["files_found"] == ["LICENSE", "README.md"]
+        assert score.details["files_found"] == "LICENSE, README.md"
+        assert score.details["count"] == 2
         assert len(score.notes) == 2
 
 
@@ -98,7 +99,7 @@ class TestMetadataScreenResult:
         """MetadataScreenResult serializes to/from JSON."""
         result = MetadataScreenResult(
             full_name="test/repo",
-            hygiene=HygieneScore(value=0.8, details={"files_found": ["LICENSE"]}),
+            hygiene=HygieneScore(value=0.8, details={"files_found": "LICENSE", "count": 1}),
             gate1_total=0.6,
             gate1_pass=True,
         )

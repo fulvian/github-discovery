@@ -62,8 +62,10 @@ class ScorecardAdapter:
             value = min(score_raw / 10.0, 1.0)
 
             checks = data.get("checks", [])
-            check_details: dict[str, object] = {
-                check["name"]: check.get("score", 0) for check in checks if isinstance(check, dict)
+            check_details: dict[str, int] = {
+                str(check["name"]): int(check.get("score", 0))
+                for check in checks
+                if isinstance(check, dict)
             }
 
             return SecurityHygieneScore(

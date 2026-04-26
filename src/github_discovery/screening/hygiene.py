@@ -101,7 +101,7 @@ class HygieneChecker:
             HygieneScore with value 0.0-1.0 and details about which files found.
         """
         contents = ctx.repo_contents
-        details: dict[str, object] = {}
+        details: dict[str, str | int | float | bool | None] = {}
         weighted_sum = 0.0
         total_weight = sum(
             float(cfg["weight"])  # type: ignore[arg-type, misc]

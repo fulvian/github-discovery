@@ -12,12 +12,15 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from github_discovery.config import ScoringSettings as _ScoringSettings
+
 if TYPE_CHECKING:
     from github_discovery.models.scoring import RankedRepo
 
 logger = structlog.get_logger("github_discovery.feasibility.metrics")
 
-_HIDDEN_GEM_STAR_THRESHOLD = 500
+# Hidden gem star threshold (single source of truth — T1.1)
+_HIDDEN_GEM_STAR_THRESHOLD = _ScoringSettings().hidden_gem_star_threshold
 _METRICS_TOP_K = 20
 
 

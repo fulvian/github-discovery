@@ -65,7 +65,7 @@ class ComplexityAnalyzer:
             confidence=0.3,
             details={
                 "total_loc": 0,
-                "languages": dict(candidate.languages),
+                "languages": json.dumps(dict(candidate.languages)),
                 "file_count": 0,
                 "avg_complexity": 0.0,
                 "source": "fallback",
@@ -115,7 +115,7 @@ class ComplexityAnalyzer:
             confidence=1.0,
             details={
                 "total_loc": total_loc,
-                "languages": language_data,
+                "languages": json.dumps(language_data),
                 "file_count": file_count,
                 "avg_complexity": avg_complexity,
                 "source": "scc",

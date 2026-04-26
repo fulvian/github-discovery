@@ -12,6 +12,7 @@ Properties:
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -142,13 +143,30 @@ class Ranker:
 
         Primary: quality_score (descending → negate)
         Secondary: confidence (descending → negate)
-        Tertiary: seeded hash for deterministic tie-breaking (descending → negate)
+        Tertiary: seeded blake2b hash for deterministic tie-breaking (descending → negate)
         Quaternary: full_name (ascending → alphabetical)
 
         Stars are NOT part of the sort key — ranking is star-neutral.
+
+        Uses hashlib.blake2b instead of built-in hash() for cross-process
+        determinism (PEP 456: PYTHONHASHSEED randomizes built-in hash).
         """
-        seeded_hash = hash((self._settings.ranking_seed, result.full_name))
-        return (-result.quality_score, -result.confidence, -seeded_hash, result.full_name)
+        return (
+            -result.quality_score,
+            -result.confidence,
+            -self._seeded_hash(result.full_name),
+            result.full_name,
+        )
+
+    def _seeded_hash(self, full_name: str) -> int:
+        """Deterministic hash using blake2b (cross-process reproducible).
+
+        Unlike built-in hash(), this is independent of PYTHONHASHSEED
+        and CPython version. blake2b is in stdlib since Python 3.6.
+        """
+        payload = f"{self._settings.ranking_seed}:{full_name}".encode()
+        digest = hashlib.blake2b(payload, digest_size=8).digest()
+        return int.from_bytes(digest, "big", signed=False)
 
     def _identify_hidden_gems(
         self,

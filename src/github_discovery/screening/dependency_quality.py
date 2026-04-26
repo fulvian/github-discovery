@@ -88,7 +88,7 @@ class DependencyQualityScorer:
             value=score,
             details={
                 "has_lockfile": has_lockfile,
-                "lockfiles_found": found_lockfiles,
+                "lockfiles_found": ", ".join(found_lockfiles),
                 "has_dependabot": has_dependabot,
                 "has_renovate": has_renovate,
                 "multi_ecosystem": is_multi_ecosystem,

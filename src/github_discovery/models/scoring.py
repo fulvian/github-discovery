@@ -26,8 +26,9 @@ _WEIGHT_TOLERANCE = 0.01
 _CORROBORATION_UNVALIDATED = 50
 _CORROBORATION_EMERGING = 500
 _CORROBORATION_VALIDATED = 5000
-_HIDDEN_GEM_MAX_STARS = 100
-_HIDDEN_GEM_MIN_QUALITY = 0.5
+# Hidden gem thresholds removed from model layer (T1.1).
+# Single source of truth: config.py ScoringSettings (hidden_gem_star_threshold,
+# hidden_gem_min_quality). ValueScoreCalculator.is_hidden_gem() is canonical.
 
 # --- Domain Profile ---
 
@@ -116,6 +117,22 @@ class ScoreResult(BaseModel):
         description="Whether Gate 3 deep assessment was performed",
     )
 
+    coverage: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fraction of profile weight backed by real data (vs neutral defaults). "
+            "Coverage 1.0 = all dimensions scored; 0.6 = only 60% of weight has real data."
+        ),
+    )
+    raw_quality_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Quality score before low-coverage damping (for explainability)",
+    )
+
     scored_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="Scoring timestamp",
@@ -147,9 +164,19 @@ class ScoreResult(BaseModel):
         """Whether this repo is a hidden gem (high quality, low visibility).
 
         This is an INFORMATIONAL LABEL — it does not affect ranking.
-        Hidden gem = quality_score >= HIDDEN_GEM_MIN_QUALITY AND stars < HIDDEN_GEM_MAX_STARS.
+
+        Uses default ScoringSettings thresholds for backward compatibility.
+        For programmatic use with custom thresholds, call
+        ValueScoreCalculator.is_hidden_gem() directly.
         """
-        return self.quality_score >= _HIDDEN_GEM_MIN_QUALITY and self.stars < _HIDDEN_GEM_MAX_STARS
+        # Lazy import to avoid circular dependency (PLC0415 suppressed)
+        from github_discovery.config import ScoringSettings  # noqa: PLC0415
+
+        settings = ScoringSettings()
+        return (
+            self.quality_score >= settings.hidden_gem_min_quality
+            and self.stars < settings.hidden_gem_star_threshold
+        )
 
     # --- Backward-compatible value_score (now equals quality_score) ---
 
@@ -197,6 +224,12 @@ class RankedRepo(BaseModel):
     def stars(self) -> int:
         """Convenience access to star count."""
         return self.score_result.stars
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_hidden_gem(self) -> bool:
+        """Convenience access to hidden gem label."""
+        return self.score_result.is_hidden_gem
 
 
 class ExplainabilityReport(BaseModel):

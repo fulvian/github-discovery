@@ -25,13 +25,13 @@ class SubScore(BaseModel):
     value: float = Field(ge=0.0, le=1.0, description="Score value 0.0-1.0")
     weight: float = Field(
         default=1.0,
-        gt=0.0,
-        le=1.0,
-        description="Weight in composite calculation",
+        ge=0.0,
+        le=10.0,
+        description="Weight in composite calculation (0.0-10.0)",
     )
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
-        description="Scoring breakdown details (e.g., which files found)",
+        description="Scoring breakdown details (JSON-compatible values only)",
     )
     confidence: float = Field(
         default=1.0,
@@ -55,7 +55,7 @@ class HygieneScore(SubScore):
     SECURITY.md, CHANGELOG.md, README.md (with content minimum).
     """
 
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
         description=(
             "Files found: {license, contributing, code_of_conduct, security, changelog, readme}"
@@ -70,7 +70,7 @@ class MaintenanceScore(SubScore):
     issue resolution rate.
     """
 
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
         description=(
             "Signals: {last_commit_days_ago, commit_cadence, bus_factor, issue_resolution_rate}"
@@ -85,7 +85,7 @@ class ReleaseDisciplineScore(SubScore):
     release notes quality.
     """
 
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
         description=(
             "Signals: {has_semver_tags, release_count, "
@@ -101,7 +101,7 @@ class ReviewPracticeScore(SubScore):
     response latency proxy.
     """
 
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
         description="Signals: {has_pr_template, review_rate, label_usage, avg_response_hours}",
     )
@@ -115,7 +115,7 @@ class TestFootprintScore(SubScore):
     file ratio.
     """
 
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
         description="Signals: {has_test_dir, test_frameworks, test_file_ratio, has_conftest}",
     )
@@ -128,7 +128,7 @@ class CiCdScore(SubScore):
     multi-OS testing, coverage reporting.
     """
 
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
         description="Signals: {has_github_actions, workflow_count, has_ci_badge, has_coverage}",
     )
@@ -141,7 +141,7 @@ class DependencyQualityScore(SubScore):
     (dependabot/renovate config).
     """
 
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
         description="Signals: {has_lockfile, pinning_ratio, has_dependabot, has_renovate}",
     )
@@ -208,7 +208,7 @@ class SecurityHygieneScore(SubScore):
     dependency update automation, signed releases.
     """
 
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
         description=(
             "Scorecard details: {scorecard_score, branch_protection, token_permissions, ...}"
@@ -223,7 +223,7 @@ class VulnerabilityScore(SubScore):
     count, age of CVEs).
     """
 
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
         description=(
             "Vulnerability details: {vuln_count, critical_count, high_count, osv_packages_checked}"
@@ -238,7 +238,7 @@ class ComplexityScore(SubScore):
     file count, directory depth.
     """
 
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
         description="Complexity details: {total_loc, languages, file_count, avg_complexity}",
     )
@@ -250,7 +250,7 @@ class SecretHygieneScore(SubScore):
     Checks: leaked secrets in git history, SARIF findings count.
     """
 
-    details: dict[str, object] = Field(
+    details: dict[str, str | int | float | bool | None] = Field(
         default_factory=dict,
         description="Secret scan details: {findings_count, scan_tool, sarif_parsed}",
     )

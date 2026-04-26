@@ -25,8 +25,8 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger("github_discovery.feasibility.sprint0")
 
-_HIDDEN_GEM_MAX_STARS = 100
-_HIDDEN_GEM_MIN_QUALITY = 0.7
+# Hidden gem thresholds from ScoringSettings (single source of truth — T1.1)
+# Note: defaults are star_threshold=500, min_quality=0.7
 
 
 @dataclass
@@ -198,12 +198,8 @@ async def run_sprint0(
     # --- Step 6: Ranking ---
     ranked_repos = _run_ranking(settings, score_results)
 
-    # --- Step 7: Identify hidden gems ---
-    hidden_gems = [
-        r
-        for r in ranked_repos
-        if r.quality_score >= _HIDDEN_GEM_MIN_QUALITY and r.stars < _HIDDEN_GEM_MAX_STARS
-    ]
+    # --- Step 7: Identify hidden gems (using ScoreResult.is_hidden_gem) ---
+    hidden_gems = [r for r in ranked_repos if r.is_hidden_gem]
 
     elapsed = time.monotonic() - start_time
     logger.info(

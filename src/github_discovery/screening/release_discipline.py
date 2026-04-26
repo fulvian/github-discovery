@@ -133,7 +133,7 @@ class ReleaseDisciplineScorer:
 
         score_val = min(1.0, score_val)
 
-        details: dict[str, object] = {
+        details: dict[str, str | int | float | bool | None] = {
             "has_semver_tags": has_semver_tags,
             "release_count": release_count,
             "release_cadence_days": round(cadence_days, 1) if cadence_days is not None else None,

@@ -62,7 +62,7 @@ class TestCiCdDetector:
         assert result.value == 0.0
         assert result.details["has_github_actions"] is False
         assert result.details["workflow_count"] == 0
-        assert result.details["ci_systems"] == []
+        assert result.details["ci_systems"] == ""
 
     def test_multiple_ci_systems(self) -> None:
         """Multiple CI systems → bonus +0.1, capped at 1.0."""
@@ -76,7 +76,7 @@ class TestCiCdDetector:
 
         # GitHub Actions (1.0) + bonus for multiple (0.1) = capped 1.0
         assert result.value == 1.0
-        assert len(result.details["ci_systems"]) == 2
+        assert len(result.details["ci_systems"].split(", ")) == 2
 
     def test_ci_details_list_systems(self) -> None:
         """Details correctly list detected CI systems."""

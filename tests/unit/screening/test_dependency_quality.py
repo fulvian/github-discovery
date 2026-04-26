@@ -102,4 +102,4 @@ class TestDependencyQuality:
         assert "has_dependabot" in result.details
         assert "has_renovate" in result.details
         assert "multi_ecosystem" in result.details
-        assert isinstance(result.details["lockfiles_found"], list)
+        assert isinstance(result.details["lockfiles_found"], str)

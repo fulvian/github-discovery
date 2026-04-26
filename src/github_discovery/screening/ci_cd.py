@@ -91,10 +91,10 @@ class CiCdDetector:
         if len(detected) > 1:
             value = min(1.0, value + 0.1)
 
-        details: dict[str, object] = {
+        details: dict[str, str | int | float | bool | None] = {
             "has_github_actions": has_github_actions,
             "workflow_count": workflow_count,
-            "ci_systems": detected,
+            "ci_systems": ", ".join(detected),
         }
 
         logger.debug(

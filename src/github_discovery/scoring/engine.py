@@ -131,7 +131,10 @@ class ScoringEngine:
             profile = self._registry.get(candidate.domain)
 
         dimension_infos = self._compute_dimension_scores(screening, assessment)
-        quality_score = self._apply_weights(dimension_infos, profile)
+        raw_quality_score, coverage = self._apply_weights(dimension_infos, profile)
+        # Penalize low-coverage scores conservatively (max 50% damping):
+        # coverage 1.0 → no damping; coverage 0.6 → score *= 0.8
+        quality_score = raw_quality_score * (0.5 + 0.5 * coverage)
         confidence = self._confidence_calc.compute(
             dimension_infos,
             screening,
@@ -148,6 +151,8 @@ class ScoringEngine:
             commit_sha=candidate.commit_sha,
             domain=candidate.domain,
             quality_score=round(quality_score, 4),
+            raw_quality_score=round(raw_quality_score, 4),
+            coverage=round(coverage, 4),
             dimension_scores=dimension_scores,
             confidence=round(confidence, 4),
             stars=candidate.stars,
@@ -359,16 +364,21 @@ class ScoringEngine:
         self,
         dimension_scores: dict[ScoreDimension, DimensionScoreInfo],
         profile: DomainProfile,
-    ) -> float:
+    ) -> tuple[float, float]:
         """Apply domain-specific weights to compute composite quality_score.
 
         Dimensions with confidence 0.0 (no data / neutral default) are
         excluded from the weighted average. Their weight is redistributed
         proportionally to the dimensions that have actual data. This prevents
         phantom 0.5 defaults from inflating or deflating the composite score.
+
+        Returns:
+            Tuple of (raw_score, coverage) where coverage ∈ [0, 1] represents
+            the fraction of profile weight backed by real data.
         """
         weighted_sum = 0.0
-        total_weight = 0.0
+        total_weight_used = 0.0
+        total_weight_possible = sum(profile.dimension_weights.values())  # ~1.0
 
         for dim, info in dimension_scores.items():
             weight = profile.dimension_weights.get(dim, 0.0)
@@ -376,11 +386,14 @@ class ScoringEngine:
             if info.confidence <= 0.0:
                 continue
             weighted_sum += info.value * weight
-            total_weight += weight
+            total_weight_used += weight
 
-        if total_weight <= 0.0:
-            return 0.0
-        return weighted_sum / total_weight
+        if total_weight_used <= 0.0:
+            return 0.0, 0.0
+
+        raw_score = weighted_sum / total_weight_used
+        coverage = total_weight_used / total_weight_possible if total_weight_possible > 0 else 0.0
+        return raw_score, coverage
 
     def _get_contributing_signals(self, dim: ScoreDimension) -> list[str]:
         """Get the sub-score names that contribute to a dimension."""

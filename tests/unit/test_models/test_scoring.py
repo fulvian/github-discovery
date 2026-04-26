@@ -111,15 +111,19 @@ class TestIsHiddenGem:
         assert score.is_hidden_gem is False
 
     def test_boundary_quality(self) -> None:
-        """quality_score = 0.5 is the minimum for hidden gem."""
-        score = ScoreResult(full_name="a/b", quality_score=0.5, stars=50)
-        assert score.is_hidden_gem is True
+        """quality_score = 0.7 (from ScoringSettings) is the minimum for hidden gem."""
+        # At threshold: quality_score == 0.7, stars < 500 → hidden gem
+        at_threshold = ScoreResult(full_name="a/b", quality_score=0.7, stars=50)
+        assert at_threshold.is_hidden_gem is True
+        # Below threshold
+        below = ScoreResult(full_name="a/b", quality_score=0.69, stars=50)
+        assert below.is_hidden_gem is False
 
     def test_boundary_stars(self) -> None:
-        """stars = 99 is below threshold, 100 is at/below."""
-        below = ScoreResult(full_name="a/b", quality_score=0.7, stars=99)
+        """stars = 499 is below threshold, 500 is at threshold."""
+        below = ScoreResult(full_name="a/b", quality_score=0.8, stars=499)
         assert below.is_hidden_gem is True
-        at_threshold = ScoreResult(full_name="a/b", quality_score=0.7, stars=100)
+        at_threshold = ScoreResult(full_name="a/b", quality_score=0.8, stars=500)
         assert at_threshold.is_hidden_gem is False
 
 

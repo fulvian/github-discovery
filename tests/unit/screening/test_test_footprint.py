@@ -68,7 +68,7 @@ class TestTestFootprintAnalyzer:
 
         assert result.value == 0.0
         assert result.details["has_test_dir"] is False
-        assert result.details["test_frameworks"] == []
+        assert result.details["test_frameworks"] == ""
 
     def test_test_file_ratio_calculated(self) -> None:
         """Test file ratio correctly calculated."""
