@@ -14,19 +14,35 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from github_discovery.models.enums import ScoreDimension
+
 if TYPE_CHECKING:
     from github_discovery.models.assessment import DeepAssessmentResult
-    from github_discovery.models.enums import ScoreDimension
+    from github_discovery.models.scoring import DomainProfile
     from github_discovery.models.screening import ScreeningResult
     from github_discovery.scoring.types import DimensionScoreInfo
 
 logger = structlog.get_logger("github_discovery.scoring.confidence")
 
-# Confidence ranges per source
+# Confidence ranges per source (fallback when no dimension-specific value)
 _SOURCE_CONFIDENCE: dict[str, float] = {
     "gate3_llm": 0.8,
     "gate12_derived": 0.4,
     "default_neutral": 0.0,
+}
+
+# Per-dimension confidence when derived from Gate 1+2 (T2.3).
+# Dimensions with empty _DERIVATION_MAP get 0.0 (not derivable).
+# Higher values indicate stronger causal link between sub-scores and dimension.
+_DIMENSION_CONFIDENCE_FROM_GATE12: dict[ScoreDimension, float] = {
+    ScoreDimension.TESTING: 0.55,  # strong mapping (test_footprint direct)
+    ScoreDimension.MAINTENANCE: 0.50,  # multiple contributing sub-scores
+    ScoreDimension.SECURITY: 0.50,  # well-structured mapping
+    ScoreDimension.DOCUMENTATION: 0.40,  # hygiene + release_discipline
+    ScoreDimension.CODE_QUALITY: 0.40,  # revised mapping (complexity + test)
+    ScoreDimension.ARCHITECTURE: 0.0,  # empty derivation map (T2.1)
+    ScoreDimension.FUNCTIONALITY: 0.0,  # not derivable from metadata
+    ScoreDimension.INNOVATION: 0.0,  # not derivable from metadata
 }
 
 # Gate coverage bonus levels
@@ -37,11 +53,19 @@ _GATE_COVERAGE_BONUS = {
 }
 
 
+# Minimum profile weight to be considered "critical" for the
+# missing-dimension penalty. Dimensions with weight ≥ this
+# threshold that have confidence 0.0 trigger a penalty.
+_CRITICAL_WEIGHT_THRESHOLD = 0.15
+
+
 class ConfidenceCalculator:
     """Confidence score calculator for scoring results.
 
     Computes an overall confidence for a ScoreResult based on
-    per-dimension confidences and gate coverage.
+    per-dimension confidences weighted by profile dimension weights,
+    with bonus for complete gate coverage and penalty for missing
+    critical dimensions.
 
     Expected ranges:
     - No data at all: 0.00
@@ -56,16 +80,19 @@ class ConfidenceCalculator:
         dimension_infos: dict[ScoreDimension, DimensionScoreInfo],
         screening: ScreeningResult | None = None,
         assessment: DeepAssessmentResult | None = None,
+        profile: DomainProfile | None = None,
     ) -> float:
         """Compute overall confidence for a scoring result.
 
-        Returns weighted average of dimension confidences,
-        with bonus for complete gate coverage.
+        Returns weighted average of dimension confidences (using
+        profile weights), with bonus for complete gate coverage
+        and penalty for missing critical dimensions.
 
         Args:
             dimension_infos: Per-dimension score metadata.
             screening: Gate 1+2 results (if available).
             assessment: Gate 3 results (if available).
+            profile: Domain profile for weight-aware confidence.
 
         Returns:
             Overall confidence (0.0-1.0).
@@ -83,11 +110,46 @@ class ConfidenceCalculator:
             for info in dimension_infos.values()
         ]
 
-        avg_confidence = sum(dim_confidences) / len(dim_confidences)
+        if profile is not None:
+            # Weighted average using profile weights (T2.2)
+            weighted_conf_sum = 0.0
+            weight_sum = 0.0
+            for info, per_dim in zip(
+                dimension_infos.values(),
+                dim_confidences,
+                strict=False,
+            ):
+                w = profile.dimension_weights.get(info.dimension, 0.0)
+                weighted_conf_sum += w * per_dim
+                weight_sum += w
+            avg_confidence = weighted_conf_sum / weight_sum if weight_sum > 0 else 0.0
+        else:
+            # Fallback: unweighted average (backward compatibility)
+            avg_confidence = sum(dim_confidences) / len(dim_confidences)
+
         bonus = self.gate_coverage_bonus(screening, assessment)
-        total = avg_confidence + bonus
+        penalty = self._missing_critical_penalty(dimension_infos, profile)
+        total = avg_confidence + bonus - penalty
 
         return max(0.0, min(1.0, total))
+
+    @staticmethod
+    def _missing_critical_penalty(
+        dimension_infos: dict[ScoreDimension, DimensionScoreInfo],
+        profile: DomainProfile | None,
+    ) -> float:
+        """Penalty for dimensions with high profile weight but zero confidence.
+
+        If any dimension with profile weight ≥ 0.15 has confidence ≤ 0.0,
+        apply a 0.10 penalty to overall confidence.
+        """
+        if profile is None:
+            return 0.0
+        for dim, info in dimension_infos.items():
+            w = profile.dimension_weights.get(dim, 0.0)
+            if w >= _CRITICAL_WEIGHT_THRESHOLD and info.confidence <= 0.0:
+                return 0.10
+        return 0.0
 
     def compute_dimension_confidence(
         self,
@@ -98,9 +160,9 @@ class ConfidenceCalculator:
     ) -> float:
         """Compute confidence for a single dimension.
 
-        Source-based confidence:
+        Source-based confidence with per-dimension tuning:
         - "gate3_llm": use LLM-reported confidence (typically 0.6-0.9)
-        - "gate12_derived": 0.3-0.5 (indirect signal)
+        - "gate12_derived": per-dimension value from _DIMENSION_CONFIDENCE_FROM_GATE12
         - "default_neutral": 0.0 (no data)
 
         Args:
@@ -117,6 +179,9 @@ class ConfidenceCalculator:
             if dim_score is not None and dim_score.confidence > 0.0:
                 return dim_score.confidence
             return _SOURCE_CONFIDENCE["gate3_llm"]
+
+        if source == "gate12_derived":
+            return _DIMENSION_CONFIDENCE_FROM_GATE12.get(dimension, 0.4)
 
         return _SOURCE_CONFIDENCE.get(source, 0.0)
 

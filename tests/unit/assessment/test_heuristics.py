@@ -48,10 +48,19 @@ class TestDetectTests:
         analyzer = HeuristicAnalyzer()
         assert analyzer._detect_tests("spec/my_spec.rb") is True
 
-    def test_detects_dunder_test(self) -> None:
-        """Content with '__test__' pattern is detected."""
+    def test_detects_dunder_tests_directory(self) -> None:
+        """Content with '__tests__' pattern is detected (plural, real convention)."""
         analyzer = HeuristicAnalyzer()
-        assert analyzer._detect_tests("__test__ module") is True
+        assert analyzer._detect_tests("__tests__/component.test.js") is True
+
+    def test_no_false_positive_from_dunder_test_in_prose(self) -> None:
+        """'__test__' in prose (without directory context) is not detected.
+
+        T2.5: path-based detection avoids false positives from prose
+        mentions of test patterns in README content.
+        """
+        analyzer = HeuristicAnalyzer()
+        assert analyzer._detect_tests("__test__ module") is False
 
     def test_no_tests_detected(self) -> None:
         """Content without test patterns returns False."""

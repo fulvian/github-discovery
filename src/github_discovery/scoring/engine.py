@@ -32,29 +32,41 @@ if TYPE_CHECKING:
 logger = structlog.get_logger("github_discovery.scoring.engine")
 
 # Dimension → (sub-score name from Gate 1/2, weight in derivation)
+#
+# Revised per audit findings (T2.1):
+# - CODE_QUALITY: product (code) > process (review). Adds complexity
+#   (structural quality) and test_footprint (testability).
+# - ARCHITECTURE: not reliably derivable from Gate 1+2 metadata.
+#   Cyclomatic complexity ≠ architectural quality. Empty for honesty.
+# - TESTING: unchanged (reasonable proxy of quantity).
+# - DOCUMENTATION: review_practice removed (no causal relation to doc
+#   quality). release_discipline added (changelog = change documentation).
+# - MAINTENANCE: tuned to reduce double-counting of ci_cd.
+# - SECURITY: unchanged (well-structured).
+# - FUNCTIONALITY/INNOVATION: not derivable from metadata.
+#
+# See docs/foundation/SCORING_METHODOLOGY.md for full rationale.
 _DERIVATION_MAP: dict[ScoreDimension, list[tuple[str, float]]] = {
     ScoreDimension.CODE_QUALITY: [
-        ("review_practice", 0.5),
-        ("ci_cd", 0.3),
-        ("dependency_quality", 0.2),
+        ("complexity", 0.35),
+        ("test_footprint", 0.25),
+        ("review_practice", 0.25),
+        ("ci_cd", 0.15),
     ],
-    ScoreDimension.ARCHITECTURE: [
-        ("complexity", 0.7),
-        ("ci_cd", 0.3),
-    ],
+    ScoreDimension.ARCHITECTURE: [],
     ScoreDimension.TESTING: [
         ("test_footprint", 0.7),
         ("ci_cd", 0.3),
     ],
     ScoreDimension.DOCUMENTATION: [
-        ("hygiene", 0.6),
-        ("review_practice", 0.4),
+        ("hygiene", 0.7),
+        ("release_discipline", 0.3),
     ],
     ScoreDimension.MAINTENANCE: [
-        ("maintenance", 0.4),
-        ("release_discipline", 0.3),
-        ("ci_cd", 0.2),
-        ("hygiene", 0.1),
+        ("maintenance", 0.45),
+        ("release_discipline", 0.35),
+        ("ci_cd", 0.10),
+        ("hygiene", 0.10),
     ],
     ScoreDimension.SECURITY: [
         ("security_hygiene", 0.35),
@@ -139,6 +151,7 @@ class ScoringEngine:
             dimension_infos,
             screening,
             assessment,
+            profile=profile,
         )
 
         dimension_scores = {dim: info.value for dim, info in dimension_infos.items()}

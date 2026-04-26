@@ -70,6 +70,43 @@ class HeuristicScores(BaseModel):
     )
 
 
+class HeuristicFallback(BaseModel):
+    """Heuristic fallback result when LLM assessment is unavailable.
+
+    Explicitly signals that scores are derived from structural
+    heuristics only — not from deep code understanding. Confidence
+    is capped low (≤ 0.25) to prevent over-reliance on these scores.
+
+    This is an "ignorance signal" (T2.4): consumers should treat
+    these scores as tentative and request LLM assessment when possible.
+    """
+
+    point_estimate: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Best-effort score from structural analysis",
+    )
+    uncertainty_range: tuple[float, float] = Field(
+        default=(0.3, 0.7),
+        description="Plausible score range (low, high)",
+    )
+    confidence: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=0.25,
+        description="Capped low — heuristic fallback only",
+    )
+    presence_signals: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Which structural signals were detected",
+    )
+    note: str = Field(
+        default=("LLM unavailable; heuristic fallback only — interpret with caution"),
+        description="Warning about score reliability",
+    )
+
+
 class AssessmentContext(BaseModel):
     """Full context for an assessment operation on a pool.
 

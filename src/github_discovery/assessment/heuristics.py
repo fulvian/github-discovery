@@ -12,6 +12,7 @@ content string — no side effects, no I/O, no LLM calls.
 from __future__ import annotations
 
 import re
+from pathlib import PurePosixPath
 
 import structlog
 
@@ -20,15 +21,23 @@ from github_discovery.assessment.types import HeuristicScores, RepoContent
 logger = structlog.get_logger(__name__)
 
 # Patterns used for detection in packed repo content.
-_TEST_PATTERNS: tuple[str, ...] = (
-    "test/",
-    "tests/",
-    "__test__",
-    "spec/",
+# Framework names — detected via substring match in content.
+_TEST_FRAMEWORK_PATTERNS: tuple[str, ...] = (
     "pytest",
     "jest",
     "vitest",
     "unittest",
+    "mocha",
+)
+
+# Directory path patterns — detected via substring match as fallback
+# when Repomix file headers are not available.
+_TEST_DIR_PATTERNS: tuple[str, ...] = (
+    "test/",
+    "tests/",
+    "__tests__",
+    "spec/",
+    "specs/",
 )
 
 _CI_PATTERNS: tuple[str, ...] = (
@@ -55,9 +64,26 @@ _SECURITY_PATTERNS: tuple[str, ...] = (
     "scorecard",
 )
 
+# Directories that typically contain test files.
+_TEST_DIRS: frozenset[str] = frozenset(
+    {
+        "tests",
+        "test",
+        "__tests__",
+        "spec",
+        "specs",
+        "testing",
+    }
+)
+
+# Regex to extract file paths from Repomix-style packed output.
+# Matches header lines like: "==== File: src/foo/bar.py ===="
+_REPOMIX_FILE_HEADER_RE: re.Pattern[str] = re.compile(
+    r"^={4,}\s*(?:File:\s*|file:\s*)(\S+)",
+    re.MULTILINE,
+)
+
 # Regex to extract file extensions from Repomix-style packed output.
-# Matches paths like "src/foo/bar.py" or "lib/utils.ts" that appear
-# in the file header lines of packed content.
 _EXTENSION_RE: re.Pattern[str] = re.compile(
     r"(?:^|[\s/])([\w.-]+\.(py|ts|tsx|js|jsx|rs|go|java|rb|php|c|cpp|h|hpp|"
     r"cs|swift|kt|scala|sh|bash|yaml|yml|json|toml|xml|html|css|scss|md|rst))",
@@ -95,6 +121,32 @@ _SIZE_TINY = 10
 _SIZE_SMALL = 50
 _SIZE_MEDIUM = 200
 _SIZE_LARGE = 1000
+
+
+def _extract_file_paths(packed: str) -> list[str]:
+    """Extract file paths from Repomix-style packed output headers.
+
+    Matches lines like: ``==== File: src/foo/bar.py ====``
+    Returns an empty list if no file headers are found (non-Repomix content).
+    """
+    return _REPOMIX_FILE_HEADER_RE.findall(packed)
+
+
+def _has_test_dir(file_paths: list[str]) -> bool:
+    """Check whether any file path is inside a known test directory.
+
+    Uses path-based detection (T2.5) to avoid false positives
+    from prose mentions of test frameworks in README files.
+    """
+    for path_str in file_paths:
+        try:
+            parts = PurePosixPath(path_str).parts
+        except ValueError:
+            continue
+        for part in parts:
+            if part.lower() in _TEST_DIRS:
+                return True
+    return False
 
 
 class HeuristicAnalyzer:
@@ -153,9 +205,22 @@ class HeuristicAnalyzer:
         )
 
     def _detect_tests(self, content: str) -> bool:
-        """Detect test infrastructure from content."""
+        """Detect test infrastructure from content.
+
+        Uses path-based detection (T2.5): first checks for test
+        directories in the file tree, then falls back to pattern
+        matching for test framework names and directory paths.
+        """
+        # Path-based: check if any file path is inside a test directory
+        file_paths = _extract_file_paths(content)
+        if file_paths:
+            return _has_test_dir(file_paths)
+
+        # Fallback: pattern matching in content (legacy behavior)
         content_lower = content.lower()
-        return any(pattern.lower() in content_lower for pattern in _TEST_PATTERNS)
+        if any(p.lower() in content_lower for p in _TEST_FRAMEWORK_PATTERNS):
+            return True
+        return any(p.lower() in content_lower for p in _TEST_DIR_PATTERNS)
 
     def _detect_ci(self, content: str) -> bool:
         """Detect CI/CD configuration from content."""
