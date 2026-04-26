@@ -13,6 +13,7 @@ class GitHubSettings(BaseSettings):
         env_prefix="GHDISC_GITHUB_",
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     token: str = Field(default="", description="GitHub personal access token")
@@ -34,6 +35,7 @@ class DiscoverySettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="GHDISC_DISCOVERY_",
         env_file=".env",
+        extra="ignore",
     )
 
     max_candidates: int = Field(default=1000, description="Max candidates per discovery query")
@@ -49,6 +51,7 @@ class ScreeningSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="GHDISC_SCREENING_",
         env_file=".env",
+        extra="ignore",
     )
 
     min_gate1_score: float = Field(default=0.4, description="Minimum Gate 1 score to pass")
@@ -69,6 +72,7 @@ class AssessmentSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="GHDISC_ASSESSMENT_",
         env_file=".env",
+        extra="ignore",
     )
 
     max_tokens_per_repo: int = Field(
@@ -155,6 +159,7 @@ class ScoringSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="GHDISC_SCORING_",
         env_file=".env",
+        extra="ignore",
     )
 
     min_confidence: float = Field(
@@ -197,6 +202,7 @@ class MCPSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="GHDISC_MCP_",
         env_file=".env",
+        extra="ignore",
     )
 
     transport: str = Field(
@@ -251,6 +257,7 @@ class APISettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="GHDISC_API_",
         env_file=".env",
+        extra="ignore",
     )
 
     host: str = Field(default="127.0.0.1", description="API server host")
@@ -279,6 +286,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         env_nested_delimiter="__",
+        extra="ignore",
     )
 
     app_name: str = "github-discovery"

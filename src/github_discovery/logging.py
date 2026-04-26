@@ -6,6 +6,28 @@ import logging
 import sys
 
 import structlog
+from structlog.types import EventDict
+
+
+def _safe_add_logger_name(
+    logger: structlog.types.WrappedLogger,
+    method_name: str,
+    event_dict: EventDict,
+) -> EventDict:
+    """Add logger name to event dict, safe with None logger.
+
+    Third-party libraries (httpx, MCP SDK) emit stdlib log records that
+    may be processed by structlog's ProcessorFormatter with ``logger=None``.
+    The built-in ``structlog.stdlib.add_logger_name`` crashes in this case
+    because it unconditionally accesses ``logger.name`` when ``_record`` is
+    absent.  This wrapper guards against that.
+    """
+    record = event_dict.get("_record")
+    if record is not None:
+        event_dict["logger"] = record.name
+    elif logger is not None:
+        event_dict["logger"] = logger.name
+    return event_dict
 
 
 def configure_logging(log_level: str = "INFO", debug: bool = False) -> None:
@@ -28,7 +50,7 @@ def configure_logging(log_level: str = "INFO", debug: bool = False) -> None:
 
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
-        structlog.stdlib.add_logger_name,
+        _safe_add_logger_name,
         structlog.stdlib.add_log_level,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt="iso", utc=True),

@@ -648,3 +648,20 @@ This was NOT a real evaluation — it was a silent failure from not respecting G
 - Updated wiki/apis/agent-integration.md: Added Context7-verified config formats, .mcp.json status table, best practices section, platform differences section
 - Updated wiki/index.md: Refreshed agent-integration.md entry
 - Updated wiki/log.md: This entry
+
+## [2026-04-26] ingest | MCP CWD Independence and Structlog Fix
+- **Root cause verified**: MCP server already works from any directory (confirmed via `kilo run` from `/tmp`). Previous commits (XDG data dir, session mkdir) resolved the CWD issue.
+- **Config loading confirmed**: Kilocode CLI merges ALL config files from `~/.config/kilo/` — `config.json`, `kilo.json`, `kilo.jsonc`, `opencode.json`, `opencode.jsonc`. The `mcp` section in `kilo.json` is picked up even though `kilo.jsonc` lacks it.
+- **Structlog fix**: Replaced `structlog.stdlib.add_logger_name` with `_safe_add_logger_name` that handles `logger=None` from third-party stdlib loggers (httpx, MCP SDK). This eliminated all stderr noise.
+- **Verification**: `kilo run` from `/tmp` → github-discovery MCP starts, 16 tools registered, `discover_repos` called successfully, zero logging errors.
+- **Source**: `src/github_discovery/logging.py` — `_safe_add_logger_name` processor
+
+## [2026-04-26] ingest | MCP Environment Isolation Edge Case
+- **Root cause**: When Kilocode spawns github-discovery MCP from `/home/fulvio/coding/aria`, the server reads aria's `.env` (CWD). pydantic-settings rejects foreign vars (`ARIA_HOME`, `KILOCODE_CONFIG_DIR`, `SOPS_AGE_KEY_FILE`) as "Extra inputs are not permitted" → crash.
+- **Why only github-discovery**: It's the only Python-based MCP server using `pydantic-settings` with `env_file=".env"`. Other MCPs (npx/uvx) don't read Python `.env`.
+- **Fix 1**: `extra="ignore"` on all 8 `SettingsConfigDict` in `config.py`
+- **Fix 2**: `_safe_add_logger_name` in `logging.py` (structlog None-logger safety)
+- **Fix 3**: `_resolve_data_dir()` in `server.py` (XDG absolute paths, CWD-independent)
+- **Verification**: `kilo mcp list` from `/home/fulvio/coding/aria` → ✓ github-discovery connected (was ✗ failed before)
+- **Created**: `docs/llm-wiki/wiki/patterns/env-isolation-resilience.md` — full analysis and design principle
+- **Updated**: `docs/llm-wiki/wiki/index.md` — added new page entry
