@@ -3,7 +3,7 @@ Title: Screening Gates Detail
 Topic: domain
 Sources: Foundation Blueprint §16.2-16.5; Roadmap Phase 3
 Raw: [blueprint.md](../../../foundation/github-discovery_foundation_blueprint.md); [roadmap.md](../../../roadmaps/github-discovery_foundation_roadmap.md)
-Updated: 2026-04-26
+Updated: 2026-04-27
 Confidence: high
 ---
 
@@ -95,6 +95,14 @@ If external tools are unavailable (Scorecard, gitleaks, scc):
 - Fall back to heuristic estimates where possible
 - Mark affected sub-scores with lower confidence
 - Never block the entire pipeline on a single tool failure
+- **Scorecard fallback aligned**: `ScorecardAdapter._FALLBACK_SCORE = 0.3` (same as `gate2_static._FALLBACK_SCORE`). Previously was 0.5 which inflated Gate 2 scores when repos weren't in the Scorecard DB.
+
+## Gate 2 → Gate 3 Hard Gate in MCP Tools (2026-04-27 fix)
+
+The MCP tool `deep_assess` performs hard gate screening before Gate 3 assessment:
+- **deep_assess**: Uses Gate 1 only (metadata, zero cost) to avoid double-clone overhead. Gate 3 already clones via repomix, so running Gate 2 (which also clones) would double the I/O and cause batch timeouts.
+- **quick_assess**: Uses Gate 1+2 (full screening) since it's a single repo and the overhead is acceptable.
+- Both tools now enrich `RepoCandidate` with real GitHub metadata before screening, fixing inaccurate Gate 1 scores from empty metadata.
 
 ## Wave 3 Hardening (Fase 2)
 

@@ -170,3 +170,43 @@ Deep analysis of all assessment modules against blueprint §6 (Layer C), §16.5 
 - [Screening Gates](../domain/screening-gates.md)
 - [Tech Stack](tech-stack.md)
 - [Phase 3 Implementation](phase3-screening-implementation.md)
+
+## Pipeline Bug Fixes (2026-04-27)
+
+Real E2E testing revealed 5 bugs in the assessment and screening pipeline. All fixed (commit `a55e708`).
+
+### BUG 1: ScorecardAdapter fallback inflated Gate 2 scores
+
+- **File**: `screening/scorecard_adapter.py`
+- **Root cause**: When OpenSSF Scorecard API returns 404/timeout/error, fallback was `value=0.5, confidence=0.0`. The 0.5 is artificially high for "no data" — all other Gate 2 tools use `_FALLBACK_SCORE = 0.3` from `gate2_static.py`.
+- **Fix**: Changed all 3 fallback paths to use `_FALLBACK_SCORE = 0.3` constant. No data ≠ neutral score.
+
+### BUG 3: deep_assess timeout — double clone overhead
+
+- **File**: `mcp/tools/assessment.py`
+- **Root cause**: `_screen_for_hard_gate()` ran Gate 1+2 for every repo before Gate 3. Gate 2 requires `git clone --depth=1`. Gate 3 (repomix) also clones. Result: 2 clones per repo, causing timeouts on batch operations (3 repos × 2 clones + 3 repomix + 3 LLM calls > 120s).
+- **Fix**: `deep_assess` now uses `GateLevel.METADATA` (Gate 1 only) for hard gate check. Gate 3 does its own deep clone via repomix. The `_screen_for_hard_gate()` function is now configurable via `gate_level` parameter. `quick_assess` still runs full Gate 1+2 since it's a single repo.
+
+### BUG 4: quick_assess always blocked by HardGateViolationError
+
+- **File**: `mcp/tools/assessment.py`
+- **Root cause**: MCP tool `quick_assess` called `assessment_orch.quick_assess(candidate)` without passing screening results → `screening=None` → `_check_hard_gate()` raised `HardGateViolationError`. Unlike `deep_assess` which calls `_screen_for_hard_gate()` internally, `quick_assess` performed NO screening at all.
+- **Fix**: Added `_screen_for_hard_gate()` call in `quick_assess` tool, passing the `ScreeningResult` to `assessment_orch.quick_assess(candidate, screening=screening)`. If screening fails, returns informative error with gate status instead of crashing.
+
+### BUG 5: RepoCandidates created with empty metadata
+
+- **File**: `mcp/tools/assessment.py`
+- **Root cause**: Both `deep_assess` and `quick_assess` created `RepoCandidate` objects from URLs with minimal metadata (no stars, no description, no commit_sha). This made Gate 1 screening inaccurate and cache keys incomplete (`full_name:` with empty commit_sha).
+- **Fix**: Created `_build_candidates_with_metadata()` and `_enrich_from_github_api()` functions that fetch real metadata (stars, description, language, commit_sha, forks, archived, is_fork) from GitHub REST API before creating candidates. Falls back to minimal candidate on API failure.
+
+### BUG 2: CuratedChannel floods pool with irrelevant results
+
+- **File**: `discovery/curated_channel.py`
+- **Root cause**: `_resolve_awesome_lists()` matched only by language, and fell back to `sindresorhus/awesome` mega-list (thousands of repos). CuratedChannel produced 500+ results at `discovery_score=0.6`, drowning the 10-30 relevant results from SearchChannel.
+- **Fix**: (1) Removed `sindresorhus/awesome` fallback — returns empty when no match found. (2) Added `_TOPIC_AWESOME_MAP` for keyword-based matching (ml, security, testing, devops, etc.). (3) Capped output at `_MAX_CURATED_CANDIDATES = 50`. (4) Explicit topic matching from `query.topics`.
+
+### Test impact
+
+- 1601 tests passing (was 1599 before BUG 1 fix updates, +2 new curated channel tests)
+- 0 lint errors, 0 type errors
+- 6 files changed, 347 insertions, 78 deletions

@@ -22,8 +22,8 @@
 ## Domain
 
 - [Scoring Dimensions and Weight Profiles](domain/scoring-dimensions.md) — 8 evaluation dimensions, domain-dependent weights, confidence scores, star-neutral value score, corroboration levels, hidden gem label (ScoringSettings single-source), derivation map, per-dimension confidence caps, coverage damping, per-profile derivation maps (T5.1), custom YAML/TOML profiles (T5.3) | Updated: 2026-04-26
-- [Discovery Channels and Strategies](domain/discovery-channels.md) — 6 discovery channels: Search, Code Search, Dependency, Registry, Awesome Lists, Seed Expansion | Updated: 2026-04-22
-- [Screening Gates Detail](domain/screening-gates.md) — Gate 1 metadata sub-scores, Gate 2 static/security sub-scores, degraded-mode handling, typed fetch errors, and hard gate enforcement | Updated: 2026-04-26
+- [Discovery Channels and Strategies](domain/discovery-channels.md) — 6 discovery channels: Search, Code Search, Dependency, Registry, Awesome Lists, Seed Expansion. CuratedChannel: no mega-list fallback, topic matching, 50 candidate cap | Updated: 2026-04-27
+- [Screening Gates Detail](domain/screening-gates.md) — Gate 1 metadata sub-scores, Gate 2 static/security sub-scores, degraded-mode handling, typed fetch errors, hard gate enforcement, scorecard fallback aligned (0.3), MCP hard gate per-tool (Gate 1 for deep_assess, Gate 1+2 for quick_assess) | Updated: 2026-04-27
 - [Competitive Landscape and Gap Analysis](domain/competitive-landscape.md) — Existing projects (github_repo_classifier, CHAOSS, OpenSSF, etc.) and the gap GitHub Discovery fills | Updated: 2026-04-22
 - [Domain Strategy and Repository Taxonomy](domain/domain-strategy.md) — 12 domain types, domain-specific weights, thresholds, star baselines, per-profile derivation maps, custom YAML/TOML profiles, ghdisc profiles CLI | Updated: 2026-04-26
 

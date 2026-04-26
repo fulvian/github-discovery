@@ -788,3 +788,45 @@ Transformed the assessment token budget system from restrictive hard daily limit
 **Tests:** 1599/1599 passing, 0 lint/type errors
 
 **Wiki updates:** `patterns/phase4-assessment-implementation.md`, `patterns/operational-rules.md`, `index.md`, `log.md`
+
+## [2026-04-27] ingest | Pipeline Bug Fixes — 5 bugs found in E2E testing
+
+### Overview
+Real E2E testing of the full discovery pipeline (Gate 0 → Gate 3 → Ranking) revealed 5 bugs. All fixed in commit `a55e708`.
+
+### BUG 1: ScorecardAdapter fallback inflates Gate 2 (HIGH)
+- **File**: `screening/scorecard_adapter.py`
+- **Root cause**: Scorecard API 404/timeout/error fallback was `value=0.5` — artificially high. All other Gate 2 tools use `_FALLBACK_SCORE = 0.3`.
+- **Fix**: Changed fallback constant `_FALLBACK_SCORE = 0.3` in all 3 error paths.
+
+### BUG 2: CuratedChannel floods pool (MEDIUM)
+- **File**: `discovery/curated_channel.py`
+- **Root cause**: `_resolve_awesome_lists()` fell back to `sindresorhus/awesome` mega-list, producing 500+ irrelevant results.
+- **Fix**: Removed mega-list fallback. Added `_TOPIC_AWESOME_MAP` for keyword matching. Capped at 50 candidates.
+
+### BUG 3: deep_assess timeout from double clone (HIGH)
+- **File**: `mcp/tools/assessment.py`
+- **Root cause**: `_screen_for_hard_gate()` ran Gate 1+2 (clone) for every repo. Gate 3 also clones via repomix. Result: 2 clones per repo → timeout on batch.
+- **Fix**: `deep_assess` uses Gate 1 only (metadata). `_screen_for_hard_gate()` accepts `gate_level` parameter. `quick_assess` still uses Gate 1+2.
+
+### BUG 4: quick_assess always blocked (HIGH)
+- **File**: `mcp/tools/assessment.py`
+- **Root cause**: MCP tool called `assessment_orch.quick_assess()` without screening → `HardGateViolationError`.
+- **Fix**: Added `_screen_for_hard_gate()` call in `quick_assess`. Returns informative error on gate failure.
+
+### BUG 5: Empty RepoCandidate metadata (MEDIUM)
+- **File**: `mcp/tools/assessment.py`
+- **Root cause**: Candidates built from URLs had no stars/description/commit_sha → inaccurate Gate 1 screening.
+- **Fix**: `_build_candidates_with_metadata()` + `_enrich_from_github_api()` fetch real metadata from GitHub REST API.
+
+### Test impact
+- 1601 tests passing (was 1599), 0 lint/type errors
+- 6 files changed, 347 insertions, 78 deletions
+- Commit: `a55e708`
+
+### Wiki updates
+- `patterns/phase4-assessment-implementation.md` — added Pipeline Bug Fixes section
+- `domain/screening-gates.md` — added Scorecard fallback note, Gate 2→Gate 3 per-tool hard gate section
+- `domain/discovery-channels.md` — added CuratedChannel fix details
+- `index.md` — updated 3 article descriptions
+- `log.md` — this entry

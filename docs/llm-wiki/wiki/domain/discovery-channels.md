@@ -3,7 +3,7 @@ Title: Discovery Channels and Strategies
 Topic: domain
 Sources: Foundation Blueprint §6 (Layer A); Roadmap Phase 2
 Raw: [blueprint.md](../../../foundation/github-discovery_foundation_blueprint.md); [roadmap.md](../../../roadmaps/github-discovery_foundation_roadmap.md)
-Updated: 2026-04-22
+Updated: 2026-04-27
 Confidence: high
 ---
 
@@ -50,6 +50,11 @@ Layer A (Gate 0) of the pipeline discovers candidates through multiple channels 
 - **What**: Parse awesome-X lists (GitHub README), community-curated collections
 - **Bias**: Curation bias (maintainer preference) but human-quality-filtered
 - **Mitigation**: Combine multiple curated lists, track source
+- **Important fix (2026-04-27)**: Removed `sindresorhus/awesome` mega-list fallback. Previously, queries without a language match fell back to this mega-list (thousands of repos), flooding the pool with irrelevant results. Now:
+  - Returns empty when no language/topic match found (instead of mega-list)
+  - Added `_TOPIC_AWESOME_MAP` for keyword matching (ml, security, testing, devops, etc.)
+  - Output capped at `_MAX_CURATED_CANDIDATES = 50` to prevent pool flooding
+  - Matches against `query.topics` (explicit) and `query.query` keywords
 
 ### 6. Seed Expansion
 - **Module**: `discovery/seed_expansion.py`
