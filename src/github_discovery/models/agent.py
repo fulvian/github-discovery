@@ -113,9 +113,9 @@ class DiscoverySession(BaseModel):
         description="Total LLM tokens consumed in this session",
     )
     tokens_budget: int = Field(
-        default=500000,
+        default=2000000,
         gt=0,
-        description="Total token budget for this session",
+        description="Soft token budget for this session (monitoring reference)",
     )
 
     # --- Ranking Progress ---

@@ -63,16 +63,16 @@ class TestDiscoverySession:
         session = DiscoverySession(
             session_id="sess-123",
             tokens_consumed=200000,
-            tokens_budget=500000,
+            tokens_budget=2000000,
         )
-        assert session.tokens_remaining == 300000
+        assert session.tokens_remaining == 1800000
 
     def test_budget_utilization(self) -> None:
         """Budget utilization ratio computed correctly."""
         session = DiscoverySession(
             session_id="sess-123",
-            tokens_consumed=250000,
-            tokens_budget=500000,
+            tokens_consumed=1000000,
+            tokens_budget=2000000,
         )
         assert session.budget_utilization == 0.5
 
@@ -97,7 +97,7 @@ class TestDiscoverySession:
             total_assessed=5,
             top_findings_count=3,
             tokens_consumed=100000,
-            tokens_budget=500000,
+            tokens_budget=2000000,
         )
         result = session.to_mcp_result()
         assert result.success is True

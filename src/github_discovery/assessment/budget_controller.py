@@ -1,18 +1,27 @@
 """Token budget enforcement for LLM assessment (Blueprint §16.5).
 
-Hard constraints that cannot be overridden:
-- Per-repo limit: max_tokens_per_repo (default 50k)
-- Per-day limit: max_tokens_per_day (default 500k)
+Hard constraints (per-repo, within model context window):
+- Per-repo limit: max_tokens_per_repo (default 100k) — hard block.
+
+Soft constraints (monitoring only):
+- Daily soft limit: daily_soft_limit (default 2M) — warning log only, never blocks.
+
+The daily limit was intentionally converted from hard to soft because:
+1. With NanoGPT subscription mode, token costs are covered by the plan.
+2. A 500k/day limit would allow only ~11 full repo assessments, blocking
+   normal discovery workflows after a single session.
+3. Industry tools (CodeRabbit, Greptile) use per-seat/per-review pricing
+   without exposing token budgets to users — they internalize LLM costs.
 
 Usage::
 
     controller = BudgetController(
-        max_tokens_per_repo=50_000,
-        max_tokens_per_day=500_000,
+        max_tokens_per_repo=100_000,
+        daily_soft_limit=2_000_000,
     )
     controller.check_repo_budget("owner/repo", estimated_tokens=12_000)
-    controller.check_daily_budget("owner/repo")
-    controller.record_usage(token_usage)
+    controller.check_daily_soft_limit("owner/repo")  # Warning only
+    controller.record_usage(token_usage, full_name="owner/repo")
 """
 
 from __future__ import annotations
@@ -33,28 +42,39 @@ logger = structlog.get_logger(__name__)
 class BudgetController:
     """Token budget enforcement for LLM assessment.
 
-    Hard constraints (Blueprint §16.5):
-    - Per-repo limit: max_tokens_per_repo (default 50k)
-    - Per-day limit: max_tokens_per_day (default 500k)
-    - These are HARD limits — no override possible.
+    Hard constraints:
+    - Per-repo limit: max_tokens_per_repo (default 100k).
+      This is a hard block — repos exceeding the model context window
+      cannot be assessed meaningfully.
+
+    Soft constraints (monitoring only):
+    - Daily soft limit: daily_soft_limit (default 2M).
+      Emits a warning log when exceeded but NEVER blocks assessment.
+      Useful for cost monitoring and anomaly detection.
     """
 
     def __init__(
         self,
         *,
-        max_tokens_per_repo: int = 50_000,
-        max_tokens_per_day: int = 500_000,
+        max_tokens_per_repo: int = 100_000,
+        daily_soft_limit: int = 2_000_000,
     ) -> None:
-        """Initialize BudgetController with per-repo and per-day limits."""
+        """Initialize BudgetController with per-repo hard limit and daily soft limit.
+
+        Args:
+            max_tokens_per_repo: Hard per-repo token limit (default 100k).
+            daily_soft_limit: Soft daily token limit for monitoring (default 2M).
+        """
         self._max_tokens_per_repo = max_tokens_per_repo
-        self._max_tokens_per_day = max_tokens_per_day
+        self._daily_soft_limit = daily_soft_limit
         self._daily_usage: dict[str, int] = {}
         self._repo_usage: dict[str, int] = {}
         self._current_day: str = date.today().isoformat()
+        self._daily_soft_limit_warned: bool = False
         logger.debug(
             "budget_controller_initialized",
             max_tokens_per_repo=max_tokens_per_repo,
-            max_tokens_per_day=max_tokens_per_day,
+            daily_soft_limit=daily_soft_limit,
         )
 
     def _today_key(self) -> str:
@@ -72,6 +92,7 @@ class BudgetController:
                 tokens_used=self._daily_usage.get(self._current_day, 0),
             )
             self._current_day = today
+            self._daily_soft_limit_warned = False
         return today
 
     def check_repo_budget(
@@ -80,6 +101,9 @@ class BudgetController:
         estimated_tokens: int,
     ) -> None:
         """Check if a repo can be assessed within per-repo budget.
+
+        This is a HARD limit — repos exceeding the model context window
+        cannot be assessed meaningfully.
 
         Args:
             full_name: Repository full name (e.g. "owner/repo").
@@ -129,37 +153,38 @@ class BudgetController:
             max_tokens_per_repo=self._max_tokens_per_repo,
         )
 
-    def check_daily_budget(self, full_name: str) -> None:
-        """Check if daily budget allows another assessment.
+    def check_daily_soft_limit(self, full_name: str) -> None:
+        """Check daily soft limit — emits warning log only, never blocks.
+
+        Use this for monitoring and anomaly detection, not for blocking
+        assessments. The daily limit is intentionally soft because:
+        1. With subscription-based LLM access, costs are pre-paid.
+        2. Hard daily limits would block discovery workflows after ~11 repos.
+        3. Industry practice (CodeRabbit, Greptile) does not expose token
+           budgets to users.
 
         Args:
             full_name: Repository full name (for logging context).
-
-        Raises:
-            BudgetExceededError: If per-day limit would be exceeded.
         """
         today_key = self._today_key()
         used = self._daily_usage.get(today_key, 0)
-        if used >= self._max_tokens_per_day:
+        if used >= self._daily_soft_limit and not self._daily_soft_limit_warned:
             logger.warning(
-                "daily_budget_exceeded",
+                "daily_soft_limit_exceeded",
                 full_name=full_name,
                 tokens_used_today=used,
-                max_tokens_per_day=self._max_tokens_per_day,
+                daily_soft_limit=self._daily_soft_limit,
+                note="This is a monitoring warning — assessment continues normally. "
+                "Set GHDISC_ASSESSMENT_DAILY_SOFT_LIMIT to adjust the threshold.",
             )
-            raise BudgetExceededError(
-                f"Daily budget exceeded: {used} used >= limit {self._max_tokens_per_day}",
-                budget_type="per_day",
-                budget_limit=self._max_tokens_per_day,
-                budget_used=used,
+            self._daily_soft_limit_warned = True
+        else:
+            logger.debug(
+                "daily_soft_limit_ok",
+                full_name=full_name,
+                tokens_used_today=used,
+                daily_soft_limit=self._daily_soft_limit,
             )
-
-        logger.debug(
-            "daily_budget_ok",
-            full_name=full_name,
-            tokens_used_today=used,
-            max_tokens_per_day=self._max_tokens_per_day,
-        )
 
     def record_usage(
         self,
@@ -195,6 +220,16 @@ class BudgetController:
             repo_total=self._repo_usage.get(full_name, 0) if full_name else 0,
         )
 
+        # Emit soft limit warning after recording if threshold crossed
+        daily_total = self._daily_usage.get(today_key, 0)
+        if daily_total >= self._daily_soft_limit and not self._daily_soft_limit_warned:
+            logger.warning(
+                "daily_soft_limit_exceeded_post_record",
+                tokens_used_today=daily_total,
+                daily_soft_limit=self._daily_soft_limit,
+            )
+            self._daily_soft_limit_warned = True
+
     @property
     def daily_tokens_used(self) -> int:
         """Total tokens consumed today."""
@@ -203,15 +238,16 @@ class BudgetController:
 
     @property
     def remaining_daily_budget(self) -> int:
-        """Remaining tokens in today's budget."""
-        return max(0, self._max_tokens_per_day - self.daily_tokens_used)
+        """Remaining tokens before daily soft limit warning."""
+        return max(0, self._daily_soft_limit - self.daily_tokens_used)
 
     def reset_daily(self) -> None:
-        """Reset daily budget (called at start of new day)."""
+        """Reset daily tracking (called at start of new day)."""
         old_day = self._current_day
         self._current_day = self._today_key()
         # Prune old daily entries older than the current day
         self._daily_usage = {k: v for k, v in self._daily_usage.items() if k >= self._current_day}
+        self._daily_soft_limit_warned = False
         logger.info(
             "daily_budget_reset",
             previous_day=old_day,

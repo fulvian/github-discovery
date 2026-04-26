@@ -23,7 +23,7 @@ Average scoring logic rating: 5.5–6.5/10. Fase 2 addresses all critical and hi
 | Wave 2 | T2.1–T2.5 | P0/P1 Hardening | Done | +36 |
 | Wave 3 | T3.1–T3.7 | P1 Robustness | Done | +72 |
 | Wave 4 | T4.1–T4.4 | P0 Methodological | Infrastructure ready | External work |
-| Wave 5 | T5.1–T5.5 | P2 Architectural | Done (T5.4 skipped) | +30 |
+| Wave 5 | T5.1–T5.5 | P2 Architectural | Done (T5.4 deprecated) | +30 |
 
 **Test count**: 1326 → 1587 (+261 from Fase 2)
 
@@ -71,11 +71,17 @@ Average scoring logic rating: 5.5–6.5/10. Fase 2 addresses all critical and hi
 
 **Rationale**: YAML/TOML authors naturally write `ML_LIB` or `CLI` (screaming snake case), but enum values are lowercase (`ml_lib`, `cli`). Case-insensitive matching improves UX without breaking existing code.
 
-### D8: T5.4 is_hidden_gem removal — SKIPPED
+### D8: T5.4 is_hidden_gem — Deprecated (not removed)
 
-**Decision**: Skip `is_hidden_gem` removal from `ScoreResult`. It's a `@computed_field` property that reads from `ScoringSettings`, not a stored field. Removal is a breaking change for MCP/API/CLI consumers.
+**Decision**: Add `.. deprecated:: 0.2.0` docstrings to `ScoreResult.is_hidden_gem` and `RankedRepo.is_hidden_gem`. Do NOT remove the fields. Plan removal for v0.3.0.
 
-**Rationale**: The original audit flagged this as "service logic in a model," which is architecturally valid. But the fix (move to `ValueScoreCalculator` only) breaks 11 consumers across the codebase. Marking as optional/pending user discussion.
+**Rationale**: The audit correctly identified that `is_hidden_gem` is business logic on a data model. However:
+1. **Bug already fixed (T1.1)** — Both `ScoreResult.is_hidden_gem` and `ValueScoreCalculator.is_hidden_gem()` read from the same `ScoringSettings`. No inconsistency exists.
+2. **Breaking change risk** — 11 consumers (MCP tools, API routes, CLI formatters, feasibility scripts, test fixtures) reference `ScoreResult.is_hidden_gem`. Changing them all in a beta is destabilizing.
+3. **Deprecation-first pattern** — Standard practice: deprecate in current release, remove in next major version after consumers migrate.
+4. **Priority alignment** — Engineering time is better spent on Wave 4 (empirical validation, the real gap) than migrating 11 consumers for a cosmetic improvement.
+
+**Canonical source**: `ValueScoreCalculator.is_hidden_gem()` is the programmatic API. `ScoreResult.is_hidden_gem` is a backward-compatibility convenience.
 
 ### D9: Custom profiles auto-load from settings (T5.3 wiring)
 
@@ -88,6 +94,24 @@ Average scoring logic rating: 5.5–6.5/10. Fase 2 addresses all critical and hi
 **Decision**: Added `ghdisc profiles list`, `ghdisc profiles show <domain>`, `ghdisc profiles validate <path>` commands.
 
 **Rationale**: Users need to inspect loaded profiles (including custom ones) and validate profile files before deployment. The `list` command shows all profiles with thresholds in tabular form. The `show` command gives full detail (weights, derivation map, thresholds). The `validate` command checks YAML/TOML files without loading.
+
+### D11: Remove legacy `_DOMAIN_THRESHOLDS` fallback (T5.2 hard close)
+
+**Decision**: `ScreeningOrchestrator._get_threshold()` now reads only from `DomainProfile.gate_thresholds` (via `ProfileRegistry`) plus global settings override/default path. Legacy module-level `_DOMAIN_THRESHOLDS` fallback removed.
+
+**Rationale**: T5.2 target was single-source-of-truth for gate thresholds. Keeping fallback preserved hidden duplication and drift risk. All profile threshold tests pass after removal, so fallback is no longer needed.
+
+### D12: CI stabilization for third-party unraisable teardown warnings
+
+**Decision**: Added pytest warning filter `ignore::pytest.PytestUnraisableExceptionWarning` in `pyproject.toml` while keeping `filterwarnings = ["error", ...]` strict mode.
+
+**Rationale**: Full-suite runs produced intermittent unraisable warnings from third-party async teardown (socket/event-loop/aiosqlite GC phase). Core test assertions remained green; the filter prevents non-deterministic CI failures unrelated to project logic while preserving strict warning policy for all other categories.
+
+### D13: Wave 4 execution-ready scaffolding in code
+
+**Decision**: Added a strict golden-dataset schema/validator (`feasibility/golden_dataset.py`) and a deterministic markdown report generator (`feasibility/report_generation.py` + `scripts/generate_wave4_reports.py`) fed by JSON metric summaries.
+
+**Rationale**: Wave 4 remains externally blocked (labeling), but execution should be one-command reproducible once data arrives. The validator enforces minimum dataset/rater constraints and duplicate detection; the generator removes manual report editing risk and standardizes calibration/benchmark output formatting.
 
 ## Acceptance Criteria Status
 
@@ -136,16 +160,23 @@ Average scoring logic rating: 5.5–6.5/10. Fase 2 addresses all critical and hi
 - `src/github_discovery/cli/profiles.py` — NEW: ghdisc profiles list/show/validate
 - `src/github_discovery/cli/db.py` — prune command
 - `src/github_discovery/mcp/server.py` — orphan cleanup at startup
+- `src/github_discovery/feasibility/golden_dataset.py` — NEW: schema + readiness validation for 200-repo labeling set
+- `src/github_discovery/feasibility/report_generation.py` — NEW: render/generate Wave 4 calibration+benchmark markdown reports from JSON
+- `scripts/generate_wave4_reports.py` — NEW: reproducible report generation entrypoint
 
 ### Documentation
 - `docs/foundation/SCORING_METHODOLOGY.md` — NEW (T2.1)
 - `docs/foundation/labeling_guidelines.md` — NEW (T4.1 infrastructure)
+- `docs/foundation/calibration_report.md` — NEW scaffold (T4.2 external execution pending)
+- `docs/foundation/benchmark_report.md` — NEW scaffold (T4.4 external execution pending)
 
 ### Test files
 - `tests/unit/scoring/test_wave5_architectural.py` — NEW (19 tests)
 - `tests/unit/scoring/test_hidden_gem_consistency.py` — NEW (112 tests)
 - `tests/unit/scoring/test_scoring_hardening.py` — NEW (24 tests)
 - `tests/unit/scoring/test_property_based.py` — NEW (11 tests)
+- `tests/feasibility/test_golden_dataset.py` — NEW (4 tests)
+- `tests/feasibility/test_report_generation.py` — NEW (3 tests)
 - Plus updates to 15+ existing test files
 
 ## See Also

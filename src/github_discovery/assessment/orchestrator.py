@@ -74,7 +74,7 @@ class AssessmentOrchestrator:
         self._parser = ResultParser()
         self._budget = BudgetController(
             max_tokens_per_repo=self._assessment_settings.max_tokens_per_repo,
-            max_tokens_per_day=self._assessment_settings.max_tokens_per_day,
+            daily_soft_limit=self._assessment_settings.daily_soft_limit,
         )
         self._provider: LLMProvider | None = None
         self._cache: dict[str, tuple[DeepAssessmentResult, float]] = {}
@@ -184,8 +184,8 @@ class AssessmentOrchestrator:
             del self._cache[cache_key]
             log.debug("assessment_cache_expired", cache_key=cache_key)
 
-        # Step 3: Budget check
-        self._budget.check_daily_budget(full_name)
+        # Step 3: Soft daily limit check (monitoring only, never blocks)
+        self._budget.check_daily_soft_limit(full_name)
 
         try:
             # Step 3b: Pre-pack budget check using repomix_max_tokens estimate

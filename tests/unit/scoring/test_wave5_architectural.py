@@ -6,12 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from github_discovery.models.candidate import RepoCandidate
-from github_discovery.models.enums import DomainType, GateLevel, ScoreDimension
+from github_discovery.models.enums import DomainType, ScoreDimension
 from github_discovery.models.scoring import DomainProfile
 from github_discovery.scoring.engine import ScoringEngine
 from github_discovery.scoring.profiles import ProfileRegistry
-
 
 # --- T5.1: Per-DomainProfile derivation_map ---
 
@@ -49,7 +47,7 @@ class TestPerProfileDerivationMap:
         profile = DomainProfile(
             domain_type=DomainType.LIBRARY,
             display_name="Test",
-            dimension_weights={dim: 0.125 for dim in ScoreDimension},
+            dimension_weights=dict.fromkeys(ScoreDimension, 0.125),
         )
         assert profile.derivation_map is None
 
@@ -59,7 +57,7 @@ class TestPerProfileDerivationMap:
         profile = DomainProfile(
             domain_type=DomainType.LIBRARY,
             display_name="Custom",
-            dimension_weights={dim: 0.125 for dim in ScoreDimension},
+            dimension_weights=dict.fromkeys(ScoreDimension, 0.125),
             derivation_map={
                 "testing": [
                     ["test_footprint", 1.0],
@@ -94,7 +92,7 @@ class TestPerProfileDerivationMap:
         profile = DomainProfile(
             domain_type=DomainType.LIBRARY,
             display_name="Custom",
-            dimension_weights={dim: 0.125 for dim in ScoreDimension},
+            dimension_weights=dict.fromkeys(ScoreDimension, 0.125),
             derivation_map={
                 "code_quality": [
                     ["test_footprint", 1.0],
@@ -123,7 +121,7 @@ class TestPerProfileDerivationMap:
         profile = DomainProfile(
             domain_type=DomainType.LIBRARY,
             display_name="Custom",
-            dimension_weights={dim: 0.125 for dim in ScoreDimension},
+            dimension_weights=dict.fromkeys(ScoreDimension, 0.125),
             derivation_map={
                 "nonexistent_dimension": [
                     ["test_footprint", 1.0],
@@ -223,16 +221,17 @@ profiles:
 
     def test_load_from_toml(self, tmp_path: Path) -> None:
         """Load custom profiles from TOML file."""
-        toml_content = """
-[[profiles]]
-domain_type = "CLI"
-display_name = "Custom CLI"
-dimension_weights = {code_quality = 0.15, architecture = 0.10, testing = 0.20, documentation = 0.10, maintenance = 0.20, security = 0.10, functionality = 0.10, innovation = 0.05}
-
-[profiles.gate_thresholds]
-gate1 = 0.45
-gate2 = 0.55
-"""
+        toml_content = (
+            "[[profiles]]\n"
+            'domain_type = "CLI"\n'
+            'display_name = "Custom CLI"\n'
+            "dimension_weights = {code_quality = 0.15, architecture = 0.10, testing = 0.20, "
+            "documentation = 0.10, maintenance = 0.20, security = 0.10, functionality = 0.10, "
+            "innovation = 0.05}\n\n"
+            "[profiles.gate_thresholds]\n"
+            "gate1 = 0.45\n"
+            "gate2 = 0.55\n"
+        )
         path = self._write_toml(tmp_path, toml_content)
         registry = ProfileRegistry()
         count = registry.load_from_toml(path)

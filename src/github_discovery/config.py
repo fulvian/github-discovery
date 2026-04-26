@@ -76,12 +76,12 @@ class AssessmentSettings(BaseSettings):
     )
 
     max_tokens_per_repo: int = Field(
-        default=50000,
-        description="Max LLM tokens per repo assessment",
+        default=100000,
+        description="Max LLM tokens per repo assessment (hard limit, within model context window)",
     )
-    max_tokens_per_day: int = Field(
-        default=500000,
-        description="Max LLM tokens per day budget",
+    daily_soft_limit: int = Field(
+        default=2000000,
+        description="Soft daily token limit for monitoring (warning only, not blocking)",
     )
 
     # NanoGPT provider settings
@@ -120,7 +120,7 @@ class AssessmentSettings(BaseSettings):
 
     # Repomix packing settings
     repomix_max_tokens: int = Field(
-        default=40000,
+        default=80000,
         description="Max tokens for repomix packed output",
     )
     repomix_compression: bool = Field(

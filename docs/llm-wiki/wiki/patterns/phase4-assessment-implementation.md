@@ -3,7 +3,7 @@ Title: Phase 4 Deep Assessment Implementation
 Topic: patterns
 Sources: Roadmap Phase 4; Blueprint §6 (Layer C), §16.5; Context7 verification of repomix, instructor, openai; NanoGPT API docs
 Raw: [roadmap.md](../../../roadmaps/github-discovery_foundation_roadmap.md); [blueprint.md](../../../foundation/github-discovery_foundation_blueprint.md); https://docs.nano-gpt.com/introduction; https://docs.nano-gpt.com/api-reference/endpoint/chat-completion
-Updated: 2026-04-23
+Updated: 2026-04-27
 Confidence: high
 ---
 
@@ -36,13 +36,16 @@ Only top 10-15% candidates from Gate 1+2 are assessed.
 - **Large repo handling**: Interface compression → character-based truncation (~4 chars/token) → early-stop
 - **Async**: `asyncio.to_thread()` wrapper since `process()` is synchronous
 
-### Budget Control (Hard Rules)
+### Budget Control
 
-- Per-repo limit: `max_tokens_per_repo` (default 50k tokens)
-- Per-day limit: `max_tokens_per_day` (default 500k tokens)
+- Per-repo limit: `max_tokens_per_repo` (default 100k tokens) — **hard constraint** (model context window boundary)
+- Daily soft limit: `daily_soft_limit` (default 2M tokens) — **monitoring only**, emits warning log but **never blocks** assessment
+- Repomix packing: `repomix_max_tokens` (default 80k tokens) — space for larger repos within the per-repo budget
 - Caching: mandatory by `full_name + commit_sha` in orchestrator's `_cache` dict
-- All limits enforced as hard constraints — `BudgetExceededError` raised, no override possible
+- Per-repo limit enforced as hard constraint — `BudgetExceededError` raised when exceeding context window
+- Daily soft limit uses `_daily_soft_limit_warned` flag to prevent warning spam (one warning per day)
 - Daily auto-reset via date key comparison in `_today_key()`
+- Rationale for soft daily limit: with NanoGPT subscription, token costs are pre-paid. Industry tools (CodeRabbit, Greptile) do not expose token budgets to users — they internalize LLM costs via per-seat pricing. The old 500k hard daily limit allowed only ~11 repo assessments before blocking the entire pipeline. The new 2M soft limit allows ~44 assessments/day with monitoring instead of blocking.
 
 ## Assessment Flow
 
@@ -112,9 +115,9 @@ assessment/
 | `llm_model` | `GHDISC_ASSESSMENT_LLM_MODEL` | `gpt-4o` | Model identifier |
 | `llm_temperature` | `GHDISC_ASSESSMENT_LLM_TEMPERATURE` | `0.1` | Sampling temperature |
 | `llm_max_retries` | `GHDISC_ASSESSMENT_LLM_MAX_RETRIES` | `3` | Max retries via instructor |
-| `max_tokens_per_repo` | `GHDISC_ASSESSMENT_MAX_TOKENS_PER_REPO` | `50000` | Per-repo token budget |
-| `max_tokens_per_day` | `GHDISC_ASSESSMENT_MAX_TOKENS_PER_DAY` | `500000` | Per-day token budget |
-| `repomix_max_tokens` | `GHDISC_ASSESSMENT_REPOMIX_MAX_TOKENS` | `40000` | Max tokens for packed content |
+| `max_tokens_per_repo` | `GHDISC_ASSESSMENT_MAX_TOKENS_PER_REPO` | `100000` | Per-repo token budget (hard) |
+| `daily_soft_limit` | `GHDISC_ASSESSMENT_DAILY_SOFT_LIMIT` | `2000000` | Daily soft limit (warning only) |
+| `repomix_max_tokens` | `GHDISC_ASSESSMENT_REPOMIX_MAX_TOKENS` | `80000` | Max tokens for packed content |
 | `repomix_compression` | `GHDISC_ASSESSMENT_REPOMIX_COMPRESSION` | `True` | Interface-mode compression |
 | `gate3_threshold` | `GHDISC_ASSESSMENT_GATE3_THRESHOLD` | `0.6` | Gate 3 pass threshold |
 | `cache_ttl_hours` | `GHDISC_ASSESSMENT_CACHE_TTL_HOURS` | `24` | Cache TTL in hours |
@@ -125,7 +128,7 @@ assessment/
 - `conftest.py` with 8 shared fixtures
 - All modules tested with mocked external dependencies (repomix, instructor)
 - Hard gate enforcement tested (5 scenarios)
-- Budget controller tested (25 tests: per-repo, daily, cumulative, auto-reset)
+- Budget controller tested (31 tests: per-repo hard, daily soft limit never blocks, cumulative, auto-reset, warning spam prevention)
 - Heuristic analyzer tested (38 tests: all 7 detection methods + scoring + categorization)
 - Result parser tested (34 tests: batch, per-dimension, fallback, name parsing, quality computation)
 - Orchestrator tested (27 tests: full pipeline, cache, cache TTL, quick_assess, hard gate)

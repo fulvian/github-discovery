@@ -28,23 +28,6 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger("github_discovery.screening.orchestrator")
 
-# Domain-specific threshold overrides (higher = stricter).
-# Covers all DomainType values — uncovered domains fall through to
-# global default from settings (0.4 gate1, 0.5 gate2).
-_DOMAIN_THRESHOLDS: dict[DomainType, dict[str, float]] = {
-    DomainType.LIBRARY: {"gate1": 0.5, "gate2": 0.6},
-    DomainType.SECURITY_TOOL: {"gate1": 0.6, "gate2": 0.7},
-    DomainType.DEVOPS_TOOL: {"gate1": 0.5, "gate2": 0.6},
-    DomainType.ML_LIB: {"gate1": 0.4, "gate2": 0.5},
-    DomainType.CLI: {"gate1": 0.4, "gate2": 0.5},
-    DomainType.BACKEND: {"gate1": 0.5, "gate2": 0.6},
-    DomainType.WEB_FRAMEWORK: {"gate1": 0.5, "gate2": 0.6},
-    DomainType.DATA_TOOL: {"gate1": 0.4, "gate2": 0.5},
-    DomainType.LANG_TOOL: {"gate1": 0.5, "gate2": 0.6},
-    DomainType.TEST_TOOL: {"gate1": 0.5, "gate2": 0.6},
-    DomainType.DOC_TOOL: {"gate1": 0.4, "gate2": 0.5},
-}
-
 _MAX_CONCURRENT = 5
 
 
@@ -187,8 +170,7 @@ class ScreeningOrchestrator:
         Priority: override > DomainProfile.gate_thresholds > global default.
 
         T5.2: reads per-domain thresholds from DomainProfile.gate_thresholds
-        instead of the module-level _DOMAIN_THRESHOLDS dict. The old dict
-        is kept as fallback for backward compatibility.
+        as the single source of truth.
         """
         if override is not None:
             return override
@@ -200,12 +182,6 @@ class ScreeningOrchestrator:
             profile = self._profile_registry.get(domain)
             if gate_key in profile.gate_thresholds:
                 return profile.gate_thresholds[gate_key]
-
-            # Fallback: legacy _DOMAIN_THRESHOLDS (for profiles without
-            # explicit gate_thresholds that somehow still have entries here)
-            domain_thresholds = _DOMAIN_THRESHOLDS.get(domain, {})
-            if gate_key in domain_thresholds:
-                return domain_thresholds[gate_key]
 
         # Global default from settings
         if gate == GateLevel.METADATA:
@@ -247,3 +223,7 @@ class ScreeningOrchestrator:
             gate1=gate1_result,
             gate2=gate2_result,
         )
+
+    async def close(self) -> None:
+        """Close owned async resources used by screeners."""
+        await self._gate2.close()

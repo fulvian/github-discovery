@@ -47,14 +47,14 @@ class SessionConfig(BaseModel):
         description="Minimum Gate 2 score threshold for this session",
     )
     max_tokens_per_repo: int = Field(
-        default=50000,
+        default=100000,
         gt=0,
         description="Max LLM tokens per repo assessment for this session",
     )
-    max_tokens_per_day: int = Field(
-        default=500000,
+    daily_soft_limit: int = Field(
+        default=2000000,
         gt=0,
-        description="Max LLM tokens per day budget for this session",
+        description="Soft daily token limit for monitoring (warning only, not blocking)",
     )
     preferred_domains: list[str] = Field(
         default_factory=list,

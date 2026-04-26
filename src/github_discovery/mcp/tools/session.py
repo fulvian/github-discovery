@@ -255,7 +255,7 @@ def _build_discovery_session(session: object) -> DiscoverySession:
         total_discovered=session.discovered_repo_count,
         total_screened=session.screened_repo_count,
         total_assessed=session.assessed_repo_count,
-        tokens_budget=session.config.max_tokens_per_day,
+        tokens_budget=session.config.daily_soft_limit,
         status=session.status.value,
         created_at=session.created_at,
         updated_at=session.updated_at,

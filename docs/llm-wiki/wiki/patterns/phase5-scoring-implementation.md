@@ -72,7 +72,7 @@ Post-independent audit by 4 LLM auditors (Claude, Gemini, ChatGPT, Perplexity). 
 - **T5.2 — Per-DomainProfile gate_thresholds**: All 12 built-in profiles now have explicit `gate_thresholds` dict. `ScreeningOrchestrator._get_threshold()` reads from `ProfileRegistry.get(domain).gate_thresholds` first, with fallback to legacy `_DOMAIN_THRESHOLDS`.
 - **T5.3 — Custom profiles YAML/TOML loading**: `ProfileRegistry` gains `load_from_yaml()`, `load_from_toml()`, `load_custom_profiles()` (auto-detects format). `_parse_profile_entry()` parses YAML/TOML dicts into `DomainProfile` with case-insensitive domain_type matching, derivation_map support, weight validation.
 - **T5.3 wiring**: `custom_profiles_path` in `ScoringSettings` auto-loads into both `ScoringEngine._registry` and `ScreeningOrchestrator._profile_registry`.
-- **T5.4 — SKIPPED**: `is_hidden_gem` removal from `ScoreResult` (optional, breaking change, requires discussion).
+- **T5.4 — DEPRECATED**: `is_hidden_gem` on `ScoreResult` and `RankedRepo` marked `.. deprecated:: 0.2.0` with removal planned for v0.3.0. Not removed because (1) bug already fixed in T1.1 (single source of truth achieved), (2) 11 consumers would break, (3) standard deprecation pattern is deprecate-first, remove-next-major. Canonical source is `ValueScoreCalculator.is_hidden_gem()`.
 - **T5.5 — Property-Based Tests (Hypothesis)**
 
 11 Hypothesis-based tests covering 1000+ generated inputs:

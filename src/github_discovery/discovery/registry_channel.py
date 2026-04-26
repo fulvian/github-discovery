@@ -137,6 +137,10 @@ class RegistryChannel:
 
     async def __aexit__(self, *args: object) -> None:
         """Exit async context manager — close internally-owned client."""
+        await self.close()
+
+    async def close(self) -> None:
+        """Close internally-owned http client (idempotent)."""
         if self._owns_client:
             await self._client.aclose()
 
@@ -176,11 +180,12 @@ class RegistryChannel:
                 return self._empty_result(elapsed=time.monotonic() - start_time)
 
             data = response.json()
-        except Exception:
+        except Exception as e:
             logger.warning(
                 "registry_pypi_error",
                 package=package_name,
-                exc_info=True,
+                error_type=type(e).__name__,
+                error=str(e),
             )
             return self._empty_result(elapsed=time.monotonic() - start_time)
 
@@ -247,11 +252,12 @@ class RegistryChannel:
                 return self._empty_result(elapsed=time.monotonic() - start_time)
 
             data = response.json()
-        except Exception:
+        except Exception as e:
             logger.warning(
                 "registry_npm_error",
                 query=query,
-                exc_info=True,
+                error_type=type(e).__name__,
+                error=str(e),
             )
             return self._empty_result(elapsed=time.monotonic() - start_time)
 
@@ -311,10 +317,18 @@ class RegistryChannel:
 
         # Handle exceptions from gather
         if isinstance(pypi_result, Exception):
-            logger.warning("registry_pypi_failed", exc_info=pypi_result)
+            logger.warning(
+                "registry_pypi_failed",
+                error_type=type(pypi_result).__name__,
+                error=str(pypi_result),
+            )
             pypi_result = self._empty_result()
         if isinstance(npm_result, Exception):
-            logger.warning("registry_npm_failed", exc_info=npm_result)
+            logger.warning(
+                "registry_npm_failed",
+                error_type=type(npm_result).__name__,
+                error=str(npm_result),
+            )
             npm_result = self._empty_result()
 
         # Merge and deduplicate by full_name

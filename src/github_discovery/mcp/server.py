@@ -9,6 +9,7 @@ across all MCP tool invocations (Blueprint §21.3).
 
 from __future__ import annotations
 
+import inspect
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,21 @@ if TYPE_CHECKING:
     from github_discovery.screening.orchestrator import ScreeningOrchestrator
 
 logger = structlog.get_logger("github_discovery.mcp.server")
+
+
+async def _close_resource(resource: object) -> None:
+    """Close a resource if it exposes ``close()``, supporting sync or async.
+
+    Test doubles may provide a synchronous ``MagicMock`` close method, while
+    production components expose async ``close()``. This helper supports both.
+    """
+    close = getattr(resource, "close", None)
+    if close is None:
+        return
+
+    result = close()
+    if inspect.isawaitable(result):
+        await result
 
 
 def _resolve_data_dir() -> Path:
@@ -153,11 +169,13 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
             _rest_client=rest_client,
         )
     finally:
-        await feature_store.close()
-        await pool_manager.close()
-        await assessment_orch.close()
-        await rest_client.close()
-        await session_manager.close()
+        await _close_resource(feature_store)
+        await _close_resource(screening_orch)
+        await _close_resource(discovery_orch)
+        await _close_resource(pool_manager)
+        await _close_resource(assessment_orch)
+        await _close_resource(rest_client)
+        await _close_resource(session_manager)
         logger.info("mcp_server_stopped")
 
 

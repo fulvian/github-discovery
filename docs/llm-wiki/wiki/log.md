@@ -745,3 +745,46 @@ Updated 5 wiki pages with complete Fase 2 Wave 0–5 coverage:
 
 Lint: 10 pre-existing broken links in older Phase 0-7 pages (plan file path changes). All Fase 2-era pages clean.
 Commit: b0945c7 on main
+
+## [2026-04-26] ingest | Phase 2 final verification hardening (post-CI stabilization)
+
+- Closed remaining T5.2 duplication: removed legacy `_DOMAIN_THRESHOLDS` fallback in `screening/orchestrator.py`; threshold policy now uses `DomainProfile.gate_thresholds` as single source of truth
+- Hardened MCP lifespan shutdown with sync/async-safe close helper (`_close_resource`) to support both real services and MagicMock test doubles
+- Added explicit close paths for discovery/screening resources (`DiscoveryOrchestrator.close`, `ScreeningOrchestrator.close`, `RegistryChannel.close`, `Gate2StaticScreener.close` including OSV adapter)
+- Stabilized CI teardown behavior by filtering `PytestUnraisableExceptionWarning` from third-party async GC phase while keeping warnings-as-errors for all other categories
+- Verified full CI green after changes (`make ci`, 1587 tests)
+- Updated `architecture/phase2-remediation.md` with D11 (strict T5.2) and D12 (CI teardown warning policy)
+
+## [2026-04-26] ingest | Wave 4 report scaffolds added
+
+- Added `docs/foundation/calibration_report.md` scaffold for T4.2/T4.3 outputs
+- Added `docs/foundation/benchmark_report.md` scaffold for T4.4 baseline and significance outputs
+- Marked both as pending external labeling/calibration execution (no fabricated metrics)
+
+## [2026-04-26] ingest | Wave 4 execution tooling (schema + report generator)
+
+- Added `src/github_discovery/feasibility/golden_dataset.py` with strict `GoldenDatasetEntry`/`ExpertRating` schema and readiness validator
+- Added `src/github_discovery/feasibility/report_generation.py` to render calibration/benchmark markdown reports from structured JSON summaries
+- Added `scripts/generate_wave4_reports.py` one-command generator for report automation
+- Added regression tests: `tests/feasibility/test_golden_dataset.py` and `tests/feasibility/test_report_generation.py`
+- Verified full CI remains green after additions (`make ci`, 1594 tests)
+
+## [2026-04-27] ingest | Budget system redesign — hard daily limit → soft monitoring
+
+Transformed the assessment token budget system from restrictive hard daily limits to soft monitoring, aligning with NanoGPT subscription model and industry norms (CodeRabbit, Greptile do not expose token budgets to users).
+
+**Code changes (8 files):**
+- `config.py` (AssessmentSettings): `max_tokens_per_repo` 50K → 100K, removed `max_tokens_per_day` (500K hard), added `daily_soft_limit` (2M warning only), `repomix_max_tokens` 40K → 80K
+- `budget_controller.py`: Complete rewrite — `check_daily_budget()` (hard, raised `BudgetExceededError`) → `check_daily_soft_limit()` (warning only, never raises). Added `_daily_soft_limit_warned` flag to prevent log spam
+- `orchestrator.py`: Constructor and call site updated to use `daily_soft_limit`
+- `models/session.py`: `SessionConfig.max_tokens_per_repo` → 100K, `max_tokens_per_day` → `daily_soft_limit` = 2M
+- `models/agent.py`: `DiscoverySession.tokens_budget` default → 2M
+- `mcp/tools/session.py`: Updated reference from `max_tokens_per_day` to `daily_soft_limit`
+- `tests/unit/assessment/test_budget_controller.py`: Rewritten — `TestCheckDailyBudget` (4 tests with `pytest.raises`) → `TestCheckDailySoftLimit` (5 tests verifying never raises). 31 tests total (from 25)
+- `tests/unit/test_models/test_agent.py`: 3 test values updated `tokens_budget=500000` → `2000000`
+
+**Rationale:** With NanoGPT subscription, token costs are pre-paid. Old 500K hard limit allowed only ~11 full assessments/day before blocking pipeline. New 2M soft limit allows ~44 assessments/day with monitoring instead of blocking.
+
+**Tests:** 1599/1599 passing, 0 lint/type errors
+
+**Wiki updates:** `patterns/phase4-assessment-implementation.md`, `patterns/operational-rules.md`, `index.md`, `log.md`

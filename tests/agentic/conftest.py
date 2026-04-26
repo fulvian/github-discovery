@@ -20,7 +20,6 @@ import contextlib
 import warnings
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
 
 import anyio
 import pytest
@@ -36,12 +35,7 @@ warnings.filterwarnings("ignore", category=ResourceWarning)
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Disable unraisable exception plugin for agentic tests.
-
-    The MCP server fixture cancels background tasks during teardown, which
-    leaves unclosed httpx transports. The unraisableexception plugin collects
-    these as errors, but they are benign (GC cleans them up).
-    """
+    """Disable unraisableexception plugin for agentic tests only."""
     config.pluginmanager.set_blocked("unraisableexception")
 
 
@@ -64,20 +58,12 @@ def agentic_settings(
 
 
 async def _run_server_and_session(
-    server: Any,
-    tmp_path: Path,
+    server: object,
 ) -> AsyncGenerator[ClientSession, None]:
-    """Manage the MCP server + client session lifecycle in one task.
-
-    This coroutine runs the server and yields a connected ClientSession.
-    Both the server task and session lifecycle are managed within the same
-    asyncio task, avoiding the "cancel scope in different task" error that
-    occurs when pytest-asyncio teardown runs in a separate task.
-    """
+    """Manage MCP server + client session in one task chain."""
     client_send, server_recv = anyio.create_memory_object_stream[SessionMessage](10)
     server_send, client_recv = anyio.create_memory_object_stream[SessionMessage](10)
-
-    init_options = server._mcp_server.create_initialization_options()
+    init_options = server._mcp_server.create_initialization_options()  # type: ignore[attr-defined]
 
     server_task = asyncio.ensure_future(
         server._mcp_server.run(
@@ -91,15 +77,22 @@ async def _run_server_and_session(
     # Allow server to fully initialize (lifespan runs async)
     await asyncio.sleep(0.5)
 
-    # Create and initialize client session
     async with ClientSession(client_recv, client_send) as session:
         await session.initialize()
         yield session
 
-    # Cleanup server task
-    server_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError, ExceptionGroup):
-        await server_task
+    # Signal EOF so server can exit gracefully and run lifespan shutdown.
+    await client_send.aclose()
+    await client_recv.aclose()
+    await server_send.aclose()
+    await server_recv.aclose()
+
+    try:
+        await asyncio.wait_for(server_task, timeout=10.0)
+    except TimeoutError:
+        server_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, ExceptionGroup):
+            await server_task
 
 
 @pytest.fixture
@@ -107,15 +100,7 @@ async def mcp_client(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> AsyncGenerator[ClientSession, None]:
-    """MCP ClientSession connected to GitHub Discovery server.
-
-    Uses in-memory transport (MemoryObjectStreams) for fast, deterministic
-    tests without launching a separate server process.
-
-    The fixture creates a background asyncio task that manages both the
-    server and session lifecycle, avoiding anyio cancel scope issues that
-    arise with pytest-asyncio's fixture teardown mechanism.
-    """
+    """MCP ClientSession connected to GitHub Discovery server."""
     # Ensure data dir exists for SQLite databases used by lifespan
     ghdisc_dir = tmp_path / ".ghdisc"
     ghdisc_dir.mkdir()
@@ -129,15 +114,13 @@ async def mcp_client(
     )
     server = create_server(settings)
 
-    # Run server+session lifecycle in a sub-task to keep cancel scopes aligned
-    gen = _run_server_and_session(server, tmp_path)
+    gen = _run_server_and_session(server)
     session = await gen.__anext__()
-
-    yield session
-
-    # Finalize the generator (triggers cleanup in the same logical task chain)
-    with contextlib.suppress(StopAsyncIteration, RuntimeError, ExceptionGroup):
-        await gen.__anext__()
+    try:
+        yield session
+    finally:
+        with contextlib.suppress(RuntimeError, StopAsyncIteration, ExceptionGroup):
+            await gen.aclose()
 
 
 @pytest.fixture

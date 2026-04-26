@@ -141,6 +141,16 @@ class DiscoveryOrchestrator:
             session_id=query.session_id,
         )
 
+    async def close(self) -> None:
+        """Close resources owned by the orchestrator.
+
+        The REST client is shared with screening in MCP/API lifespans and is
+        closed by the outer lifecycle owner. This method closes resources that
+        are unique to discovery orchestration.
+        """
+        await self._registry_channel.close()
+        await self._graphql_client.close()
+
     def _resolve_channels(self, query: DiscoveryQuery) -> list[DiscoveryChannel]:
         """Resolve which channels to run from query or settings.
 

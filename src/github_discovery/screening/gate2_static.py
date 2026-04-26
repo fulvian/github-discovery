@@ -286,6 +286,7 @@ class Gate2StaticScreener:
     async def close(self) -> None:
         """Clean up resources (httpx clients, temp dirs)."""
         await self._scorecard.close()
+        await self._osv.close()
 
     async def screen_batch(
         self,

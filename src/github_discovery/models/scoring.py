@@ -171,6 +171,17 @@ class ScoreResult(BaseModel):
     def is_hidden_gem(self) -> bool:
         """Whether this repo is a hidden gem (high quality, low visibility).
 
+        .. deprecated:: 0.2.0
+            This computed_field couples a data model to business logic and
+            configuration. For programmatic access, use
+            ``ValueScoreCalculator.is_hidden_gem()`` instead, which accepts
+            explicit thresholds.
+
+            This field will be removed in v0.3.0. The canonical source for
+            the hidden gem label is ``ValueScoreCalculator`` — this property
+            exists solely for backward compatibility with MCP tools, API
+            routes, and CLI output that read ``ScoreResult.is_hidden_gem``.
+
         This is an INFORMATIONAL LABEL — it does not affect ranking.
 
         Uses default ScoringSettings thresholds for backward compatibility.
@@ -236,7 +247,12 @@ class RankedRepo(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def is_hidden_gem(self) -> bool:
-        """Convenience access to hidden gem label."""
+        """Convenience access to hidden gem label.
+
+        .. deprecated:: 0.2.0
+            See ``ScoreResult.is_hidden_gem`` for deprecation details.
+            Will be removed in v0.3.0.
+        """
         return self.score_result.is_hidden_gem
 
 

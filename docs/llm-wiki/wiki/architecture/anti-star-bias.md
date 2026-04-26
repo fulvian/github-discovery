@@ -51,6 +51,24 @@ This is an **informational label** — it does NOT affect ranking, does NOT boos
 
 **Fase 2 T1.1 fix (2026-04-26)**: Previously, `models/scoring.py` had hardcoded `_HIDDEN_GEM_MAX_STARS=100` and `_HIDDEN_GEM_MIN_QUALITY=0.5` that diverged from `ScoringSettings` defaults (`hidden_gem_star_threshold=500`, `hidden_gem_min_quality=0.7`). The model-level constants were removed — `ScoreResult.is_hidden_gem` now reads `ScoringSettings` as the **single source of truth**. The `RankedRepo` model also gained an `is_hidden_gem` field to propagate the label through the ranking pipeline.
 
+### T5.4 Decision — Deprecation, Not Removal (2026-04-26)
+
+`is_hidden_gem` exists in **two places**:
+1. `ScoreResult.is_hidden_gem` — `@computed_field` on the data model (reads `ScoringSettings`)
+2. `ValueScoreCalculator.is_hidden_gem()` — service method with explicit thresholds (canonical)
+
+**Architectural issue**: A Pydantic model should contain data, not business logic. The hidden gem classification is a service-level evaluation, not intrinsic scoring data.
+
+**Decision: deprecate on `ScoreResult`, remove in v0.3.0.**
+
+Rationale for not removing immediately:
+1. **Bug already fixed (T1.1)** — Both sources now read from `ScoringSettings`. No inconsistency.
+2. **Breaking change** — 11 consumers (MCP tools, API routes, CLI formatters, feasibility scripts, test fixtures) reference `ScoreResult.is_hidden_gem`. Changing them all in a beta is destabilizing.
+3. **Standard deprecation pattern** — Add `.. deprecated::` docstring now, remove field in v0.3.0 after consumers migrate.
+4. **Priority** — Wave 4 (empirical validation) is the real gap; time spent migrating 11 consumers is better spent on the golden dataset.
+
+Both `ScoreResult.is_hidden_gem` and `RankedRepo.is_hidden_gem` now carry `.. deprecated:: 0.2.0` docstrings directing consumers to `ValueScoreCalculator.is_hidden_gem()`.
+
 ## Domain-Awareness
 
 Star relevance varies by domain:
@@ -73,7 +91,7 @@ Star-neutral scoring is implemented across multiple modules:
 ### `models/scoring.py` — ScoreResult
 - `value_score` computed_field: returns `quality_score` (star-neutral)
 - `corroboration_level` computed_field: classifies stars into informational buckets
-- `is_hidden_gem` computed_field: informational label — reads `ScoringSettings` as single source of truth (quality ≥ 0.7 AND stars < 500 by default)
+- `is_hidden_gem` computed_field: **deprecated 0.2.0** — informational label, reads `ScoringSettings`. Will be removed in v0.3.0; use `ValueScoreCalculator.is_hidden_gem()` instead
 - `coverage: float` — fraction of dimensions with non-zero scores (Fase 2 T1.3)
 - `raw_quality_score: float` — quality before coverage damping (Fase 2 T1.3)
 - Constants: `_CORROBORATION_UNVALIDATED=50`, `_CORROBORATION_EMERGING=500`, `_CORROBORATION_VALIDATED=5000`

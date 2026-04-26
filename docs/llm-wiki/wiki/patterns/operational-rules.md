@@ -3,7 +3,7 @@ Title: Operational Rules and Workflow Standards
 Topic: patterns
 Sources: Foundation Blueprint §17; Roadmap §8
 Raw: [blueprint.md](../../../foundation/github-discovery_foundation_blueprint.md); [roadmap.md](../../../roadmaps/github-discovery_foundation_roadmap.md)
-Updated: 2026-04-26
+Updated: 2026-04-27
 Confidence: high
 ---
 
@@ -47,7 +47,7 @@ Explore → Plan → Implement → Verify → Review → Ship
 - **Gate enforcement**: Gate 1+2 pass required before Gate 3 deep assessment — implemented as hard constraint
 - **Anti-star bias**: Stars are context, never primary ranking signal
 - **Explainability**: Every score must be explainable by feature and dimension
-- **Cost awareness**: LLM budget is an architectural requirement, not an optimization
+- **Cost awareness**: LLM budget uses soft monitoring (2M daily soft limit, warning only) — per-repo hard limit (100k) enforces context window boundary; daily limit never blocks assessment
 - **MCP-First**: Every feature accessible via MCP tool before API endpoint
 - **Progressive deepening**: MCP tools are granular and composable
 - **Context efficiency**: Default < 2000 tokens per MCP tool invocation
