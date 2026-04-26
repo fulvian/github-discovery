@@ -6,7 +6,11 @@ from github_discovery.exceptions import (
     AssessmentError,
     BudgetExceededError,
     ConfigurationError,
+    GitHubAuthError,
     GitHubDiscoveryError,
+    GitHubFetchError,
+    GitHubRateLimitError,
+    GitHubServerError,
     HardGateViolationError,
     MCPError,
     RateLimitError,
@@ -104,3 +108,46 @@ class TestExceptionHierarchy:
         )
         assert exc.reset_at == "2026-04-22T15:00:00Z"
         assert exc.remaining == 0
+
+
+class TestGitHubFetchErrors:
+    """Tests for typed GitHub fetch error hierarchy."""
+
+    def test_fetch_error_hierarchy(self) -> None:
+        """All fetch errors inherit from GitHubFetchError and GitHubDiscoveryError."""
+        assert issubclass(GitHubFetchError, GitHubDiscoveryError)
+        assert issubclass(GitHubAuthError, GitHubFetchError)
+        assert issubclass(GitHubRateLimitError, GitHubFetchError)
+        assert issubclass(GitHubServerError, GitHubFetchError)
+
+    def test_fetch_error_with_status_code(self) -> None:
+        """GitHubFetchError captures status_code and url."""
+        exc = GitHubFetchError("fetch failed", status_code=500, url="https://api.github.com/repos")
+        assert exc.status_code == 500
+        assert exc.url == "https://api.github.com/repos"
+        assert "status_code=500" in str(exc)
+
+    def test_auth_error(self) -> None:
+        """GitHubAuthError is a GitHubFetchError."""
+        exc = GitHubAuthError("unauthorized", status_code=401)
+        assert exc.status_code == 401
+        assert isinstance(exc, GitHubFetchError)
+
+    def test_rate_limit_error_with_retry_after(self) -> None:
+        """GitHubRateLimitError captures retry_after from header."""
+        exc = GitHubRateLimitError(retry_after=60, status_code=429)
+        assert exc.retry_after == 60
+        assert exc.status_code == 429
+        assert "retry_after=60" in str(exc)
+
+    def test_rate_limit_error_default_message(self) -> None:
+        """GitHubRateLimitError has default message 'rate limited'."""
+        exc = GitHubRateLimitError()
+        assert "rate limited" in str(exc)
+        assert exc.retry_after is None
+
+    def test_server_error(self) -> None:
+        """GitHubServerError captures 5xx status code."""
+        exc = GitHubServerError("internal server error", status_code=503)
+        assert exc.status_code == 503
+        assert isinstance(exc, GitHubFetchError)

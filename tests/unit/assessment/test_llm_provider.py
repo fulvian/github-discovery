@@ -19,12 +19,19 @@ from github_discovery.models.enums import ScoreDimension
 
 def _make_provider() -> LLMProvider:
     """Create an LLMProvider with mocked instructor client."""
-    with patch("github_discovery.assessment.llm_provider.instructor") as mock_instructor:
+    with (
+        patch("github_discovery.assessment.llm_provider.instructor") as mock_instructor,
+        patch("github_discovery.assessment.llm_provider.AsyncOpenAI") as mock_async_openai,
+    ):
         mock_client = MagicMock()
         mock_client.chat = MagicMock()
         mock_client.chat.completions = MagicMock()
         mock_client.chat.completions.create = AsyncMock()
-        mock_client.close = AsyncMock()
+
+        mock_openai = MagicMock()
+        mock_openai.close = AsyncMock()
+        mock_async_openai.return_value = mock_openai
+
         mock_instructor.from_openai.return_value = mock_client
 
         provider = LLMProvider(
@@ -34,6 +41,7 @@ def _make_provider() -> LLMProvider:
         )
         # Store reference for test assertions
         provider._mock_client = mock_client  # type: ignore[attr-defined]
+        provider._mock_openai = mock_openai  # type: ignore[attr-defined]
         return provider
 
 
@@ -219,7 +227,7 @@ class TestClose:
         provider = _make_provider()
         await provider.close()
 
-        provider._mock_client.close.assert_awaited_once()
+        provider._mock_openai.close.assert_awaited_once()
 
     async def test_close_is_idempotent(self) -> None:
         """close() can be called multiple times without error."""
@@ -227,7 +235,7 @@ class TestClose:
         await provider.close()
         await provider.close()
 
-        assert provider._mock_client.close.await_count == 2
+        assert provider._mock_openai.close.await_count == 2
 
 
 class TestLastTokenUsage:

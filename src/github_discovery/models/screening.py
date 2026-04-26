@@ -180,6 +180,10 @@ class MetadataScreenResult(BaseModel):
     gate1_total: float = Field(default=0.0, ge=0.0, le=1.0, description="Weighted composite score")
     gate1_pass: bool = Field(default=False, description="Whether candidate passed Gate 1")
     threshold_used: float = Field(default=0.4, description="Threshold applied for pass/fail")
+    degraded_count: int = Field(
+        default=0,
+        description="Number of sub-score fetches that degraded due to API errors",
+    )
 
     def compute_total(self) -> float:
         """Compute weighted composite score from sub-scores."""

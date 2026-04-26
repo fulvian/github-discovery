@@ -14,6 +14,7 @@ import structlog
 
 from github_discovery.config import ScreeningSettings  # noqa: TC001
 from github_discovery.discovery.github_client import GitHubRestClient  # noqa: TC001
+from github_discovery.exceptions import GitHubFetchError
 from github_discovery.models.candidate import RepoCandidate  # noqa: TC001
 from github_discovery.models.screening import (
     CiCdScore,
@@ -72,25 +73,46 @@ class Gate1MetadataScreener:
     async def gather_context(
         self,
         candidate: RepoCandidate,
-    ) -> RepoContext:
+    ) -> tuple[RepoContext, int]:
         """Gather all metadata needed for Gate 1 scoring.
 
         Makes parallel API calls to collect: repo contents,
         releases, commits, issues, PRs, languages.
+
+        Returns:
+            Tuple of (RepoContext, degraded_count) where degraded_count
+            is the number of API calls that degraded due to errors.
         """
         api_base = f"/repos/{candidate.full_name}"
         semaphore = asyncio.Semaphore(_MAX_CONCURRENT)
+        degraded_count = 0
 
         async def _fetch(
             url: str,
             params: dict[str, str | int] | None = None,
         ) -> object:
+            nonlocal degraded_count
             async with semaphore:
                 try:
                     result = await self._client.get_json(url, params=params)
                     return result or {}
-                except Exception:
-                    logger.warning("gate1_context_fetch_failed", url=url)
+                except GitHubFetchError as exc:
+                    logger.warning(
+                        "gate1_context_fetch_degraded",
+                        url=url,
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
+                    degraded_count += 1
+                    return {}
+                except Exception as exc:
+                    logger.warning(
+                        "gate1_context_fetch_failed",
+                        url=url,
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
+                    degraded_count += 1
                     return {}
 
         # Parallel context gathering (7 API calls — includes repo metadata for star enrichment)
@@ -120,16 +142,19 @@ class Gate1MetadataScreener:
             # Single file response
             repo_contents = [str(contents_raw.get("name", ""))]
 
-        return RepoContext(
-            candidate=candidate,
-            repo_metadata={},  # Already in RepoCandidate from discovery
-            repo_contents=repo_contents,
-            recent_releases=releases if isinstance(releases, list) else [],
-            recent_commits=commits if isinstance(commits, list) else [],
-            recent_issues=issues if isinstance(issues, list) else [],
-            recent_prs=prs if isinstance(prs, list) else [],
-            languages=languages if isinstance(languages, dict) else {},
-            topics=candidate.topics,
+        return (
+            RepoContext(
+                candidate=candidate,
+                repo_metadata={},  # Already in RepoCandidate from discovery
+                repo_contents=repo_contents,
+                recent_releases=releases if isinstance(releases, list) else [],
+                recent_commits=commits if isinstance(commits, list) else [],
+                recent_issues=issues if isinstance(issues, list) else [],
+                recent_prs=prs if isinstance(prs, list) else [],
+                languages=languages if isinstance(languages, dict) else {},
+                topics=candidate.topics,
+            ),
+            degraded_count,
         )
 
     async def screen(
@@ -140,7 +165,7 @@ class Gate1MetadataScreener:
     ) -> MetadataScreenResult:
         """Screen a single candidate through Gate 1."""
         # 1. Gather context
-        ctx = await self.gather_context(candidate)
+        ctx, degraded_count = await self.gather_context(candidate)
 
         # 2. Check archived/disabled repos — auto-fail
         if candidate.is_archived_or_disabled:
@@ -150,6 +175,7 @@ class Gate1MetadataScreener:
                 gate1_total=0.0,
                 gate1_pass=False,
                 threshold_used=threshold or self._settings.min_gate1_score,
+                degraded_count=degraded_count,
             )
 
         # 3. Run all 7 sub-score checkers with error isolation
@@ -199,6 +225,7 @@ class Gate1MetadataScreener:
             ci_cd=ci_cd,
             dependency_quality=dependency_quality,
             threshold_used=threshold_val,
+            degraded_count=degraded_count,
         )
 
         # 5. Compute total and apply threshold

@@ -55,6 +55,14 @@ class DomainProfile(BaseModel):
         default_factory=lambda: {"gate1": 0.4, "gate2": 0.5, "gate3": 0.6},
         description="Minimum pass scores per gate for this domain",
     )
+    derivation_map: dict[str, list[list[float | str]]] | None = Field(
+        default=None,
+        description=(
+            "Per-domain override for Gate 1+2 → dimension derivation mapping. "
+            "Format: {dimension_name: [[sub_score_name, weight], ...]}. "
+            "None = use default _DERIVATION_MAP from engine.py (T5.1)."
+        ),
+    )
     star_baseline: float = Field(
         default=1000.0,
         description="Expected star count for an 'established' project in this domain",
@@ -315,6 +323,7 @@ LIBRARY_PROFILE = DomainProfile(
         ScoreDimension.FUNCTIONALITY: 0.05,
         ScoreDimension.INNOVATION: 0.05,
     },
+    gate_thresholds={"gate1": 0.5, "gate2": 0.6, "gate3": 0.6},
     star_baseline=500.0,
     preferred_channels=["search", "registry", "awesome_list"],
 )
@@ -333,6 +342,7 @@ CLI_PROFILE = DomainProfile(
         ScoreDimension.FUNCTIONALITY: 0.10,
         ScoreDimension.INNOVATION: 0.05,
     },
+    gate_thresholds={"gate1": 0.4, "gate2": 0.5, "gate3": 0.6},
     star_baseline=300.0,
     preferred_channels=["search", "registry", "awesome_list"],
 )
@@ -351,6 +361,7 @@ DEVOPS_PROFILE = DomainProfile(
         ScoreDimension.FUNCTIONALITY: 0.05,
         ScoreDimension.INNOVATION: 0.05,
     },
+    gate_thresholds={"gate1": 0.5, "gate2": 0.6, "gate3": 0.6},
     star_baseline=2000.0,
     preferred_channels=["search", "dependency", "registry"],
 )
@@ -369,6 +380,7 @@ BACKEND_PROFILE = DomainProfile(
         ScoreDimension.FUNCTIONALITY: 0.05,
         ScoreDimension.INNOVATION: 0.05,
     },
+    gate_thresholds={"gate1": 0.5, "gate2": 0.6, "gate3": 0.6},
     star_baseline=1500.0,
     preferred_channels=["search", "registry", "dependency"],
 )

@@ -12,7 +12,7 @@ Confidence: high
 Phase 5 implements Layer D (Scoring & Ranking) — the final pipeline stage that combines Gate 1+2+3 outputs into composite multi-dimensional scores, applies domain profiles, computes star-neutral quality scores, and produces ranked, explainable results.
 
 **Status: COMPLETE + VERIFIED + STAR-NEUTRAL REDESIGN + FASE 2 AUDIT REMEDIATION** — `make ci` green: ruff + ruff format + mypy --strict + pytest.
-1515 total project tests pass (168 scoring tests).
+1587 total project tests pass (187 scoring tests).
 
 ## Star-Neutral Redesign (2026-04-25)
 
@@ -58,7 +58,22 @@ Post-independent audit by 4 LLM auditors (Claude, Gemini, ChatGPT, Perplexity). 
 - **T2.4 — HeuristicFallback model**: New `HeuristicFallback` in `assessment/types.py` with confidence capped at 0.25. Explicit ignorance signal: `note` warns "LLM unavailable; heuristic fallback only — interpret with caution".
 - **T2.5 — Path-based test detection**: `_extract_file_paths()` parses Repomix file headers. `_has_test_dir()` checks file paths against known test directories. Prevents false positives from README prose mentions.
 
-### T5.5 — Property-Based Tests (Hypothesis)
+### Wave 3 — Robustness & Resource Safety (gap-fix pass)
+
+- **T3.1/T3.2 — Typed fetch + retry wiring fixed**: `GitHubRestClient.get()/get_all_pages()/search()` now use typed `_tenacity_fetch()` path. Status mapping happens before retry decisions; 304 is handled as non-error for ETag requests.
+- **T3.2 — Retry-After honored**: when GitHub returns `Retry-After`, retry loop waits bounded seconds before retrying.
+- **T3.4 — LLM lifecycle hardening**: `LLMProvider` now keeps a direct `AsyncOpenAI` handle and closes it explicitly, avoiding reliance on instructor wrapper internals.
+- **T3.5 — TTL semantics fixed**: `FeatureStore` read/stats/cleanup paths now consistently use `expires_at` (with legacy fallback for pre-migration rows).
+- **T3.7 — Value normalization deduplicated**: cross-domain normalization now mirrors `normalized_value_score` to `normalized_quality` (star-neutral invariant).
+
+### Wave 5 — Architectural Refactoring (T5.1–T5.3, T5.5)
+
+- **T5.1 — Per-DomainProfile derivation_map**: New `derivation_map: dict[str, list[list[float | str]]] | None` field on `DomainProfile`. `ScoringEngine._resolve_derivation_map()` merges profile entries with module-level `_DERIVATION_MAP` defaults (profile overrides specific dimensions, others fall through to default).
+- **T5.2 — Per-DomainProfile gate_thresholds**: All 12 built-in profiles now have explicit `gate_thresholds` dict. `ScreeningOrchestrator._get_threshold()` reads from `ProfileRegistry.get(domain).gate_thresholds` first, with fallback to legacy `_DOMAIN_THRESHOLDS`.
+- **T5.3 — Custom profiles YAML/TOML loading**: `ProfileRegistry` gains `load_from_yaml()`, `load_from_toml()`, `load_custom_profiles()` (auto-detects format). `_parse_profile_entry()` parses YAML/TOML dicts into `DomainProfile` with case-insensitive domain_type matching, derivation_map support, weight validation.
+- **T5.3 wiring**: `custom_profiles_path` in `ScoringSettings` auto-loads into both `ScoringEngine._registry` and `ScreeningOrchestrator._profile_registry`.
+- **T5.4 — SKIPPED**: `is_hidden_gem` removal from `ScoreResult` (optional, breaking change, requires discussion).
+- **T5.5 — Property-Based Tests (Hypothesis)**
 
 11 Hypothesis-based tests covering 1000+ generated inputs:
 - ScoreResult bounds: quality_score, confidence, coverage ∈ [0,1]
@@ -79,11 +94,15 @@ Post-independent audit by 4 LLM auditors (Claude, Gemini, ChatGPT, Perplexity). 
 - `DimensionScoreInfo` tracks source gate and confidence for each dimension
 - **FeatureStore integration**: Optional `store` parameter in constructor. `score()` remains sync (backward compatible); new `async score_cached()` checks store before computing and writes results back after
 
-### ProfileRegistry: 11 Domain Profiles
+### ProfileRegistry: 12 Domain Profiles + Custom Loading
 
-- Pre-existing 4 profiles from Phase 1 models: CLI, DEVOPS, LIBRARY, BACKEND
+- Pre-existing 5 profiles from Phase 1 models: CLI, DEVOPS, LIBRARY, BACKEND, OTHER (DEFAULT)
 - 7 new profiles added in Phase 5: WEB_FRAMEWORK, DATA_TOOL, ML_LIB, SECURITY_TOOL, LANG_TOOL, TEST_TOOL, DOC_TOOL
 - Each profile has domain-specific dimension weights, gate pass thresholds, and relevance indicators
+- **T5.1**: Each profile can override derivation_map (dimension→sub-score mappings)
+- **T5.2**: All 12 profiles have explicit gate_thresholds (gate1, gate2, gate3)
+- **T5.3**: YAML/TOML custom profile loading with case-insensitive domain_type matching
+- **T5.3 wiring**: `ScoringSettings.custom_profiles_path` auto-loads into ProfileRegistry
 
 ### ValueScoreCalculator: Star-Neutral Implementation
 
@@ -172,11 +191,12 @@ Added to `config.py` with env prefix `GHDISC_SCORING_`:
 
 ## Test Coverage
 
-- 168 unit tests across 13 test files in `tests/unit/scoring/`
+- 187 unit tests across 14 test files in `tests/unit/scoring/`
 - Phase 5 original: 136 tests across 9 files
 - Star-neutral redesign: +10 tests (corroboration, hidden gem, value_score)
 - Fase 2 Wave 1: +120 tests (hidden_gem_consistency=112, deterministic_ranking=4, coverage_field=5, -1 updated)
 - Fase 2 Wave 2: +36 tests (scoring_hardening=24, heuristic_hardening=12)
+- Fase 2 Wave 5: +19 tests (per-profile derivation=6, per-profile thresholds=4, YAML/TOML loading=9)
 - T5.5 Hypothesis: +11 property-based tests (1000+ generated inputs)
 - Updated tests:
   - `test_value_score.py`: rewritten for star-neutral expectations

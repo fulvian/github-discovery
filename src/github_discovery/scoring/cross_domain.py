@@ -130,7 +130,7 @@ class CrossDomainGuard:
             if domain_key in _skip:
                 # Skip z-score — use original quality score directly
                 norm_quality = max(0.0, min(1.0, r.quality_score))
-                norm_vs = max(0.0, min(1.0, r.value_score))
+                norm_vs = norm_quality
             else:
                 # Avoid division by zero
                 safe_std = std if std > _MIN_STD else 0.1
@@ -138,13 +138,9 @@ class CrossDomainGuard:
                 norm_quality = (r.quality_score - mean) / safe_std + 0.5
                 norm_quality = max(0.0, min(1.0, norm_quality))
 
-                # Normalize value_score similarly
-                vs_mean = stats.get("vs_mean", 0.2)
-                vs_std = stats.get("vs_std", 0.05)
-                safe_vs_std = vs_std if vs_std > _MIN_STD else 0.05
-
-                norm_vs = (r.value_score - vs_mean) / safe_vs_std + 0.5
-                norm_vs = max(0.0, min(1.0, norm_vs))
+                # value_score is star-neutral alias of quality_score.
+                # Keep the same normalized value to avoid redundant normalization paths.
+                norm_vs = norm_quality
 
             normalized.append(
                 NormalizedScore(

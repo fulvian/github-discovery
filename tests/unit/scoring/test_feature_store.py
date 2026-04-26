@@ -127,9 +127,10 @@ class TestFeatureStoreCleanup:
         db = feature_store._db
         assert db is not None
         expired_time = (datetime.now(UTC) - timedelta(hours=50)).isoformat()
+        expired_at = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         await db.execute(
-            "UPDATE score_features SET scored_at = ? WHERE full_name = ?",
-            (expired_time, "test/old"),
+            "UPDATE score_features SET scored_at = ?, expires_at = ? WHERE full_name = ?",
+            (expired_time, expired_at, "test/old"),
         )
         await db.commit()
 

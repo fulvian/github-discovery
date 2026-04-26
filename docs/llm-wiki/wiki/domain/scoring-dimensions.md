@@ -40,14 +40,18 @@ Default weights are **not universal**. Each domain has specific weight profiles:
 ## Domain Taxonomy
 
 `DomainType` enum:
-- `CLI` — Command-line tools
+- `cli` — Command-line tools
 - `web_framework` — Web frameworks and servers
 - `data_tool` — Data processing and analysis
 - `ml_lib` — Machine learning libraries
 - `devops_tool` — DevOps and infrastructure tools
 - `library` — General-purpose libraries
 - `backend` — Backend services and APIs
-- `other` — Catch-all
+- `security_tool` — Security analysis and tooling
+- `lang_tool` — Language servers, linters, formatters
+- `test_tool` — Testing frameworks and utilities
+- `doc_tool` — Documentation generators and tools
+- `other` — Catch-all (default)
 
 ## Confidence Score
 
@@ -131,20 +135,32 @@ An informational label (NOT a score modifier). Thresholds are single-sourced fro
 |-----------|---------------------------|
 | ARCHITECTURE | *(empty — requires Gate 3)* |
 | CODE_QUALITY | complexity(0.35) + test_footprint(0.25) + review_practice(0.25) + ci_cd(0.15) |
-| DOCUMENTATION | release_discipline(0.50) + review_practice(0.25) + hygiene(0.25) |
-| TESTING | test_footprint(1.0) |
-| MAINTENANCE | release_discipline(0.50) + maintenance(0.25) + practices(0.25) |
-| SECURITY | dependency_quality(0.40) + ci_cd(0.30) + practices(0.30) |
+| DOCUMENTATION | hygiene(0.7) + release_discipline(0.3) |
+| TESTING | test_footprint(0.7) + ci_cd(0.3) |
+| MAINTENANCE | maintenance(0.45) + release_discipline(0.35) + ci_cd(0.10) + hygiene(0.10) |
+| SECURITY | security_hygiene(0.35) + vulnerability(0.25) + secret_hygiene(0.25) + dependency_quality(0.15) |
 | FUNCTIONALITY | *(empty — requires Gate 3)* |
 | INNOVATION | *(empty — requires Gate 3)* |
 
 Key changes from Fase 2 audit: ARCHITECTURE derivation cleared (was using weak proxies), CODE_QUALITY rebalanced (complexity now 0.35, was too low), DOCUMENTATION uses release_discipline instead of review_practice.
 
+### Per-Profile Derivation Maps (Fase 2 T5.1)
+
+Each `DomainProfile` can override the default derivation map via its `derivation_map` field. The engine merges profile-specific entries with the module-level defaults — dimensions specified in the profile override defaults, unspecified dimensions keep the default mapping.
+
+### Custom Profile Loading (Fase 2 T5.3)
+
+`ProfileRegistry` supports loading custom profiles from YAML/TOML files:
+- `load_from_yaml()` / `load_from_toml()` / `load_custom_profiles()` (auto-detects format)
+- Case-insensitive domain_type matching (YAML `ML_LIB` → enum `ml_lib`)
+- Supports custom derivation_map and gate_thresholds
+- `ScoringSettings.custom_profiles_path` auto-loads on registry initialization
+
 ## Implementation Status
 
-**Phase 5 (Layer D) COMPLETE + Star-Neutral Redesign + Fase 2 Audit Remediation (Wave 1+2)**: The scoring engine is fully implemented in `src/github_discovery/scoring/`. Key implementation modules:
-- `engine.py` — ScoringEngine combining Gate 1+2+3 into composite multi-dimensional scores, revised `_DERIVATION_MAP` (Fase 2 T2.1), quality damping via coverage (Fase 2 T1.3)
-- `profiles.py` — ProfileRegistry with 11 domain profiles (7 new in Phase 5)
+**Phase 5 (Layer D) COMPLETE + Star-Neutral Redesign + Fase 2 Audit Remediation (Wave 1–3, 5)**: The scoring engine is fully implemented in `src/github_discovery/scoring/`. Key implementation modules:
+- `engine.py` — ScoringEngine combining Gate 1+2+3 into composite multi-dimensional scores, revised `_DERIVATION_MAP` (Fase 2 T2.1), quality damping via coverage (Fase 2 T1.3), per-profile derivation map merging (T5.1)
+- `profiles.py` — ProfileRegistry with 12 domain profiles, custom YAML/TOML loading (T5.3), case-insensitive domain_type matching, auto-load from ScoringSettings
 - `value_score.py` — ValueScoreCalculator (star-neutral: returns quality_score unchanged)
 - `confidence.py` — ConfidenceCalculator with per-dimension confidence (Fase 2 T2.3), weighted average (Fase 2 T2.2), missing critical dimension penalty (Fase 2 T2.2), gate coverage bonus
 - `ranker.py` — Ranker with star-neutral intra-domain ranking (quality DESC, confidence DESC), deterministic `hashlib.blake2b` tie-breaking (Fase 2 T1.2)
@@ -154,7 +170,7 @@ Key changes from Fase 2 audit: ARCHITECTURE derivation cleared (was using weak p
 - `assessment/types.py` — `HeuristicFallback` model with confidence capped at 0.25 (Fase 2 T2.4)
 - `assessment/heuristics.py` — Repomix header-based test detection, `_TEST_DIR_PATTERNS`/`_TEST_FRAMEWORK_PATTERNS` split (Fase 2 T2.5)
 
-**Test count**: 1326 → 1515 (+189 new tests from Fase 2)
+**Test count**: 1326 → 1587 (+261 new tests from Fase 2)
 
 See [Phase 5 Implementation](../patterns/phase5-scoring-implementation.md) for full details.
 

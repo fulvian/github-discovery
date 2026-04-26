@@ -134,32 +134,3 @@ class ValueScoreCalculator:
             f"{stars:,} stars — widely adopted. "
             f"Quality score is strongly corroborated by broad usage."
         )
-
-    def normalize_batch(
-        self,
-        scores: list[tuple[str, float, int]],
-    ) -> list[tuple[str, float]]:
-        """Normalize quality scores across a batch to 0.0-1.0 range.
-
-        Note: Stars are NOT used in normalization. This is purely
-        quality-based normalization for cross-domain comparison.
-
-        Args:
-            scores: List of (full_name, quality_score, stars).
-                Stars are accepted for API compatibility but unused.
-
-        Returns:
-            List of (full_name, normalized_quality_score) in [0.0, 1.0].
-        """
-        if not scores:
-            return []
-
-        computed: list[tuple[str, float]] = []
-        for full_name, quality, _stars in scores:
-            computed.append((full_name, max(quality, 0.0)))
-
-        max_q = max(q for _, q in computed)
-        if max_q <= 0.0:
-            return [(name, 0.0) for name, _ in computed]
-
-        return [(name, q / max_q) for name, q in computed]

@@ -108,6 +108,15 @@ class CrossDomainComparison(BaseModel):
         default_factory=dict,
         description="Per-domain stats: {domain: {mean, std, count}}",
     )
+    cross_domain_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Confidence in cross-domain normalization. "
+            "0.0 if not normalized (too few repos or near-uniform domain)."
+        ),
+    )
 
 
 class RankingResult(BaseModel):

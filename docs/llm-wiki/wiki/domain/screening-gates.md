@@ -3,7 +3,7 @@ Title: Screening Gates Detail
 Topic: domain
 Sources: Foundation Blueprint §16.2-16.5; Roadmap Phase 3
 Raw: [blueprint.md](../../../foundation/github-discovery_foundation_blueprint.md); [roadmap.md](../../../roadmaps/github-discovery_foundation_roadmap.md)
-Updated: 2026-04-22
+Updated: 2026-04-26
 Confidence: high
 ---
 
@@ -95,6 +95,13 @@ If external tools are unavailable (Scorecard, gitleaks, scc):
 - Fall back to heuristic estimates where possible
 - Mark affected sub-scores with lower confidence
 - Never block the entire pipeline on a single tool failure
+
+## Wave 3 Hardening (Fase 2)
+
+- Gate 1 context collection now tracks degraded API fetches explicitly via `degraded_count`
+- GitHub API failures are typed (`GitHubAuthError`, `GitHubRateLimitError`, `GitHubServerError`, `GitHubFetchError`) and logged with error class
+- Retry/backoff is enforced in the REST client for retryable classes (rate limit + 5xx)
+- Gate 2 startup performs orphan clone cleanup (`cleanup_orphan_clones`) to reduce temp-dir leaks after interrupted runs
 
 ## See Also
 

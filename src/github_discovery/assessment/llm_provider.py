@@ -7,6 +7,7 @@ automatic retries. Used by the Gate 3 deep assessment pipeline.
 
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING
 
 import instructor
@@ -59,12 +60,11 @@ class LLMProvider:
         self._fallback_model = fallback_model
         self._token_usage: TokenUsage | None = None
 
-        self._client = instructor.from_openai(
-            AsyncOpenAI(
-                base_url=base_url,
-                api_key=api_key,
-            ),
+        self._openai_client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key,
         )
+        self._client = instructor.from_openai(self._openai_client)
 
         logger.debug(
             "llm_provider_initialized",
@@ -244,11 +244,23 @@ class LLMProvider:
 
         Wrapped in try/except to handle clients that don't expose close().
         """
-        try:
-            await self._client.close()
-        except AttributeError:
+        close_method = getattr(self._openai_client, "close", None)
+        if close_method is None:
             logger.debug("llm_provider_close_not_supported")
+            return
+
+        maybe_awaitable = close_method()
+        if inspect.isawaitable(maybe_awaitable):
+            await maybe_awaitable
         logger.debug("llm_provider_closed")
+
+    async def __aenter__(self) -> LLMProvider:
+        """Enter async context — initialize client (already done in __init__)."""
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        """Exit async context — close the underlying client."""
+        await self.close()
 
     @property
     def last_token_usage(self) -> TokenUsage | None:

@@ -181,3 +181,61 @@ class HardGateViolationError(GitHubDiscoveryError):
         self.repo_url = repo_url
         self.gate_passed = gate_passed
         self.gate_required = gate_required
+
+
+# --- GitHub API Fetch Errors ---
+
+
+class GitHubFetchError(GitHubDiscoveryError):
+    """Base for all GitHub API fetch errors."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        url: str | None = None,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        """Initialize with HTTP status code and URL context."""
+        ctx = context or {}
+        if status_code is not None:
+            ctx["status_code"] = status_code
+        if url is not None:
+            ctx["url"] = url
+        super().__init__(message, context=ctx)
+        self.status_code = status_code
+        self.url = url
+
+
+class GitHubAuthError(GitHubFetchError):
+    """Authentication failure (401/403)."""
+
+
+class GitHubRateLimitError(GitHubFetchError):
+    """Rate limit exceeded (429/403)."""
+
+    def __init__(
+        self,
+        message: str = "rate limited",
+        *,
+        retry_after: int | None = None,
+        status_code: int | None = None,
+        url: str | None = None,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        """Initialize with retry_after from Retry-After header."""
+        ctx = context or {}
+        if retry_after is not None:
+            ctx["retry_after"] = retry_after
+        super().__init__(
+            message,
+            status_code=status_code,
+            url=url,
+            context=ctx,
+        )
+        self.retry_after = retry_after
+
+
+class GitHubServerError(GitHubFetchError):
+    """Server error (5xx)."""

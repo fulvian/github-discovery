@@ -18,6 +18,7 @@ from github_discovery.exceptions import HardGateViolationError
 from github_discovery.models.candidate import RepoCandidate  # noqa: TC001
 from github_discovery.models.enums import DomainType, GateLevel
 from github_discovery.models.screening import ScreeningResult
+from github_discovery.scoring.profiles import ProfileRegistry
 from github_discovery.screening.gate1_metadata import Gate1MetadataScreener  # noqa: TC001
 from github_discovery.screening.gate2_static import Gate2StaticScreener  # noqa: TC001
 from github_discovery.screening.types import ScreeningContext
@@ -67,6 +68,9 @@ class ScreeningOrchestrator:
         self._settings = settings
         self._gate1 = gate1_screener
         self._gate2 = gate2_screener
+        self._profile_registry = ProfileRegistry(
+            custom_profiles_path=settings.scoring.custom_profiles_path or None,
+        )
 
     async def screen(
         self,
@@ -178,16 +182,28 @@ class ScreeningOrchestrator:
         domain: DomainType | None = None,
         override: float | None = None,
     ) -> float:
-        """Get threshold for a gate, considering domain and override.
+        """Get threshold for a gate, considering domain profile and override.
 
-        Priority: override > domain-specific > global default.
+        Priority: override > DomainProfile.gate_thresholds > global default.
+
+        T5.2: reads per-domain thresholds from DomainProfile.gate_thresholds
+        instead of the module-level _DOMAIN_THRESHOLDS dict. The old dict
+        is kept as fallback for backward compatibility.
         """
         if override is not None:
             return override
 
+        gate_key = "gate1" if gate == GateLevel.METADATA else "gate2"
+
+        # T5.2: Read from DomainProfile first (single source of truth)
         if domain is not None:
+            profile = self._profile_registry.get(domain)
+            if gate_key in profile.gate_thresholds:
+                return profile.gate_thresholds[gate_key]
+
+            # Fallback: legacy _DOMAIN_THRESHOLDS (for profiles without
+            # explicit gate_thresholds that somehow still have entries here)
             domain_thresholds = _DOMAIN_THRESHOLDS.get(domain, {})
-            gate_key = "gate1" if gate == GateLevel.METADATA else "gate2"
             if gate_key in domain_thresholds:
                 return domain_thresholds[gate_key]
 

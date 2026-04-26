@@ -3,7 +3,7 @@ Title: Operational Rules and Workflow Standards
 Topic: patterns
 Sources: Foundation Blueprint §17; Roadmap §8
 Raw: [blueprint.md](../../../foundation/github-discovery_foundation_blueprint.md); [roadmap.md](../../../roadmaps/github-discovery_foundation_roadmap.md)
-Updated: 2026-04-22
+Updated: 2026-04-26
 Confidence: high
 ---
 
@@ -59,6 +59,13 @@ Explore → Plan → Implement → Verify → Review → Ship
 - Structured error results over exceptions for expected failures (e.g., repo not scorable)
 - `structlog` for structured JSON logging — never `print()` for diagnostics
 - Always include context in error messages (repo URL, dimension, gate level)
+
+## Retry/Backoff Policy (Fase 2 Wave 3)
+
+- GitHub HTTP failures are mapped to typed exceptions before retry decisions
+- Retry is allowed only for transient classes (`GitHubRateLimitError`, `GitHubServerError`)
+- Backoff uses exponential jitter with bounded wait; `Retry-After` is honored when provided
+- Non-retryable classes (`GitHubAuthError`, generic 4xx) fail fast and propagate explicit diagnostics
 
 ## See Also
 

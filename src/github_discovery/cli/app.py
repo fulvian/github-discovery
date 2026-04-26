@@ -110,12 +110,14 @@ app.add_typer(session_app, name="session")
 def _register_commands() -> None:
     """Register all CLI commands via lazy imports."""
     from github_discovery.cli.compare import register as reg_compare
+    from github_discovery.cli.db import register as reg_db
     from github_discovery.cli.deep_eval import register as reg_deep_eval
     from github_discovery.cli.discover import register as reg_discover
     from github_discovery.cli.explain import register as reg_explain
     from github_discovery.cli.export import register as reg_export
     from github_discovery.cli.mcp_config import register as reg_mcp_config
     from github_discovery.cli.mcp_serve import register as reg_mcp_serve
+    from github_discovery.cli.profiles import register as reg_profiles
     from github_discovery.cli.rank import register as reg_rank
     from github_discovery.cli.screen import register as reg_screen
     from github_discovery.cli.session import register as reg_session
@@ -127,6 +129,8 @@ def _register_commands() -> None:
     reg_explain(app)
     reg_compare(app)
     reg_export(app)
+    reg_db(app)
+    reg_profiles(app)
     reg_session(session_app)
     reg_mcp_serve(mcp_app)
     reg_mcp_config(mcp_app)

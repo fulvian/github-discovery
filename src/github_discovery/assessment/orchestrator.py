@@ -394,3 +394,4 @@ class AssessmentOrchestrator:
         """Close resources (LLM provider)."""
         if self._provider is not None:
             await self._provider.close()
+            self._provider = None

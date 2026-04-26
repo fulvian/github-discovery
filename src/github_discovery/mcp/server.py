@@ -100,11 +100,14 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     from github_discovery.scoring.feature_store import FeatureStore
     from github_discovery.scoring.ranker import Ranker
     from github_discovery.screening.gate1_metadata import Gate1MetadataScreener
-    from github_discovery.screening.gate2_static import Gate2StaticScreener
+    from github_discovery.screening.gate2_static import Gate2StaticScreener, cleanup_orphan_clones
     from github_discovery.screening.orchestrator import ScreeningOrchestrator
 
     settings = Settings()
     logger.info("mcp_server_starting", transport=settings.mcp.transport)
+
+    # Clean up orphaned clone directories from previous sessions
+    cleanup_orphan_clones()
 
     # Resolve data directory (CWD-independent for MCP server usability)
     data_dir = _resolve_data_dir()

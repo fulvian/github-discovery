@@ -232,14 +232,15 @@ class FeatureStore:
     async def cleanup_expired(self) -> int:
         """Remove all expired entries. Returns count removed."""
         db = await self._get_db()
-
-        # Calculate cutoff based on max TTL
-        cutoff = datetime.now(UTC) - timedelta(hours=self._ttl_hours)
-        cutoff_str = cutoff.isoformat()
-
+        now_iso = datetime.now(UTC).isoformat()
+        legacy_cutoff_iso = (datetime.now(UTC) - timedelta(hours=self._ttl_hours)).isoformat()
         cursor = await db.execute(
-            "DELETE FROM score_features WHERE scored_at < ?",
-            (cutoff_str,),
+            (
+                "DELETE FROM score_features "
+                "WHERE (expires_at IS NOT NULL AND expires_at <= ?) "
+                "OR (expires_at IS NULL AND scored_at < ?)"
+            ),
+            (now_iso, legacy_cutoff_iso),
         )
         await db.commit()
         removed = cursor.rowcount
@@ -298,10 +299,15 @@ class FeatureStore:
         total = row["cnt"] if row else 0
 
         # Expired count
-        cutoff = (datetime.now(UTC) - timedelta(hours=self._ttl_hours)).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
+        legacy_cutoff_iso = (datetime.now(UTC) - timedelta(hours=self._ttl_hours)).isoformat()
         cursor = await db.execute(
-            "SELECT COUNT(*) as cnt FROM score_features WHERE scored_at < ?",
-            (cutoff,),
+            (
+                "SELECT COUNT(*) as cnt FROM score_features "
+                "WHERE (expires_at IS NOT NULL AND expires_at <= ?) "
+                "OR (expires_at IS NULL AND scored_at < ?)"
+            ),
+            (now_iso, legacy_cutoff_iso),
         )
         row = await cursor.fetchone()
         expired = row["cnt"] if row else 0
@@ -343,10 +349,13 @@ class FeatureStore:
             List of ScoreResult for the given domain.
         """
         db = await self._get_db()
-        cutoff = (datetime.now(UTC) - timedelta(hours=self._ttl_hours)).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         cursor = await db.execute(
-            "SELECT * FROM score_features WHERE domain = ? AND scored_at >= ?",
-            (domain.value, cutoff),
+            (
+                "SELECT * FROM score_features "
+                "WHERE domain = ? AND (expires_at IS NULL OR expires_at > ?)"
+            ),
+            (domain.value, now_iso),
         )
         rows = await cursor.fetchall()
         return [self._row_to_result(row) for row in rows]
@@ -364,11 +373,14 @@ class FeatureStore:
             Most recent ScoreResult or None if not found or expired.
         """
         db = await self._get_db()
-        cutoff = (datetime.now(UTC) - timedelta(hours=self._ttl_hours)).isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         cursor = await db.execute(
-            "SELECT * FROM score_features WHERE full_name = ? AND scored_at >= ? "
-            "ORDER BY scored_at DESC LIMIT 1",
-            (full_name, cutoff),
+            (
+                "SELECT * FROM score_features "
+                "WHERE full_name = ? AND (expires_at IS NULL OR expires_at > ?) "
+                "ORDER BY scored_at DESC LIMIT 1"
+            ),
+            (full_name, now_iso),
         )
         row = await cursor.fetchone()
         if row is None:

@@ -361,10 +361,12 @@ class GitHubRestClient:
         if not url.startswith("http"):
             url = f"{self._base_url}{url}"
 
-        async def _request() -> httpx.Response:
-            return await self._client.get(url, params=params, headers=headers)
-
-        response = await self._retry_on_rate_limit(_request, is_search=is_search)
+        response = await self._tenacity_fetch(
+            url,
+            params=params,
+            headers=headers or None,
+            is_search=is_search,
+        )
 
         # 304 Not Modified is a valid response for conditional requests
         if response.status_code != _HTTP_NOT_MODIFIED:
@@ -427,15 +429,10 @@ class GitHubRestClient:
             # Capture current values to avoid closure capturing loop variables (B023)
             _current_url: str = current_url
 
-            async def _request(
-                _url: str = _current_url,
-                _params: dict[str, str | int] | None = request_params,
-            ) -> httpx.Response:
-                return await self._client.get(_url, params=_params)
-
-            response = await self._retry_on_rate_limit(_request)
-
-            response.raise_for_status()
+            response = await self._tenacity_fetch(
+                _current_url,
+                params=request_params,
+            )
             data = response.json()
 
             # GitHub list endpoints return arrays
@@ -512,15 +509,11 @@ class GitHubRestClient:
             _url = url
             _params = dict(params)
 
-            async def _request(
-                _u: str = _url,
-                _p: dict[str, str | int] = _params,
-            ) -> httpx.Response:
-                return await self._client.get(_u, params=_p)
-
-            response = await self._retry_on_rate_limit(_request, is_search=True)
-
-            response.raise_for_status()
+            response = await self._tenacity_fetch(
+                _url,
+                params=_params,
+                is_search=True,
+            )
             data = response.json()
 
             total_count = data.get("total_count", 0)
@@ -577,6 +570,8 @@ class GitHubRestClient:
         """
         if _HTTP_OK_MIN <= response.status_code < _HTTP_OK_MAX:
             return None
+        if response.status_code == _HTTP_NOT_MODIFIED:
+            return None
         if response.status_code == _HTTP_UNAUTHORIZED:
             return GitHubAuthError(
                 f"Authentication failed: {response.text[:200]}",
@@ -585,7 +580,10 @@ class GitHubRestClient:
             )
         if response.status_code == _HTTP_FORBIDDEN:
             retry_after = response.headers.get("Retry-After")
-            retry_after_int = int(retry_after) if retry_after else None
+            retry_after_int: int | None = None
+            if retry_after is not None:
+                with contextlib.suppress(ValueError):
+                    retry_after_int = int(retry_after)
             if "rate limit" in response.text.lower() or retry_after is not None:
                 return GitHubRateLimitError(
                     f"Rate limited: {response.text[:200]}",
@@ -600,10 +598,13 @@ class GitHubRestClient:
             )
         if response.status_code == _HTTP_TOO_MANY_REQUESTS:
             retry_after = response.headers.get("Retry-After")
-            retry_after_int = int(retry_after) if retry_after else None
+            retry_after_int_429: int | None = None
+            if retry_after is not None:
+                with contextlib.suppress(ValueError):
+                    retry_after_int_429 = int(retry_after)
             return GitHubRateLimitError(
                 f"Too many requests: {response.text[:200]}",
-                retry_after=retry_after_int,
+                retry_after=retry_after_int_429,
                 status_code=_HTTP_TOO_MANY_REQUESTS,
                 url=str(response.url),
             )
@@ -631,17 +632,24 @@ class GitHubRestClient:
         *,
         params: dict[str, str | int] | None = None,
         headers: dict[str, str] | None = None,
+        is_search: bool = False,
     ) -> httpx.Response:
         """Fetch with tenacity retry on rate limit and server errors.
 
         Maps HTTP status codes to typed exceptions before raising,
         so tenacity only retries on retryable error types.
         """
+        await self._await_if_rate_limited(is_search=is_search)
         response = await self._client.get(url, params=params, headers=headers)
         await self._track_rate_limits(response)
 
         typed_error = self._map_status_error(response)
         if typed_error is not None:
+            if (
+                isinstance(typed_error, GitHubRateLimitError)
+                and typed_error.retry_after is not None
+            ):
+                await asyncio.sleep(max(1, min(typed_error.retry_after, int(_RETRY_MAX_WAIT))))
             raise typed_error
         return response
 

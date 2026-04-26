@@ -705,3 +705,31 @@ Fase 2 addresses findings from an independent 4-LLM audit of the scoring pipelin
 - **Wave 3** (T3.1–T3.7): Robustness & Resource Safety — NOT STARTED
 - **Wave 4** (T4.1–T4.4): Empirical Calibration — NOT STARTED (external labeling)
 - **Wave 5** (T5.1–T5.4): Architectural Refactor — NOT STARTED (T5.5 done)
+
+## [2026-04-26] ingest | Fase 2 Wave 3 Gap Fixes — Robustness Alignment
+- Verified Wave 3 implementation against `docs/plans/fase2_plan.md` and fixed remaining wiring gaps
+- `GitHubRestClient`: public methods now use typed `_tenacity_fetch`; 304 treated as non-error; `Retry-After` honored
+- `Gate1MetadataScreener`: context fetch degradation logs now preserve typed error class (`GitHubFetchError` hierarchy)
+- `LLMProvider`: explicit `AsyncOpenAI` lifecycle close to prevent connection leakage through wrapper abstractions
+- `FeatureStore`: expires_at semantics applied consistently in cleanup/stats/get_by_domain/get_latest with legacy fallback
+- `CrossDomainGuard`: removed redundant value normalization path (`normalized_value_score == normalized_quality` in star-neutral mode)
+- Added regression tests for expires_at read paths and star-neutral cross-domain normalization invariants
+- Updated wiki pages: `domain/screening-gates.md`, `patterns/operational-rules.md`, `patterns/phase5-scoring-implementation.md`, `index.md`
+
+## [2026-04-26] ingest | Wave 5 Architectural Refactoring (T5.1–T5.3) + custom_profiles_path wiring
+
+- Fixed 8 test failures from prior session's untested Wave 5 implementation
+- **T5.1 fix**: `_resolve_derivation_map()` now merges profile entries with `_DERIVATION_MAP` defaults (profile overrides, unspecified dims keep default)
+- **T5.3 fix**: `_parse_profile_entry()` normalizes `domain_type` to lowercase for case-insensitive matching (YAML `ML_LIB` → enum `ml_lib`)
+- **Test fixes**: corrected `Gate1Result` → `MetadataScreenResult` imports, `SubScore` → typed subclasses (`TestFootprintScore`, `HygieneScore`), removed `ScoreDimension.NONEXISTENT_DIMENSION` usage
+- **Custom profiles wiring**: `ProfileRegistry.__init__` accepts optional `custom_profiles_path`; `ScoringEngine` and `ScreeningOrchestrator` pass `ScoringSettings.custom_profiles_path` to registry
+- **CI green**: 1587 tests passing, ruff clean, mypy --strict clean
+- Updated wiki pages: `patterns/phase5-scoring-implementation.md`, `domain/scoring-dimensions.md`, `index.md`
+
+## [2026-04-26] ingest | Fase 2 documentation deliverables
+
+- Created `docs/foundation/SCORING_METHODOLOGY.md` (545 lines) — T2.1 deliverable: full derivation map with rationale, per-dimension design decisions, formula documentation, references (8 citations), 12 domain profiles, sub-score cross-reference
+- Created `docs/foundation/labeling_guidelines.md` (828 lines) — T4.1 infrastructure: rater qualifications, 1-5 rubric for all 8 dimensions, domain-specific considerations, calibration procedure (Cohen's κ ≥ 0.6), JSON schema for rating data, bias mitigation, sample dataset structure (204 repos)
+- Created wiki page `architecture/phase2-remediation.md` — Decision log for all Fase 2 waves: 9 key decisions (D1–D9), acceptance criteria status (13/15 done), files modified inventory
+- Verified T3.3 (orphan clone cleanup) and T3.5 (`ghdisc db prune`) already implemented
+- Updated wiki index with new page

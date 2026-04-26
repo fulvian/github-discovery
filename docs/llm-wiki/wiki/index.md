@@ -10,6 +10,7 @@
 - [Star-Neutral Quality Scoring](architecture/anti-star-bias.md) — Star-neutral design: value_score = quality_score, corroboration levels, hidden gem as informational label (ScoringSettings single-source), quality-first ranking, deterministic blake2b tie-breaking | Updated: 2026-04-26
 - [Option C Hybrid Architecture Decision](architecture/option-c-hybrid.md) — Architecture decision: API+Worker+MCP native+CLI hybrid, now evolved to MCP-native | Updated: 2026-04-22
 - [Architecture Analysis — Complete System Overview](architecture/architecture-analysis.md) — Comprehensive architecture analysis (v0.1.0-alpha): 4-gate pipeline detail, star-neutral scoring, 107-file codebase structure, 1326 tests, data flow, database architecture, error patterns | Updated: 2026-04-26
+- [Phase 2 Audit Remediation — Decision Log](architecture/phase2-remediation.md) — Post-audit remediation decisions: Waves 0–3+5 complete (1587 tests), Wave 4 infrastructure ready, key decisions on derivation map, coverage damping, deterministic ranking, custom profiles | Updated: 2026-04-26
 
 ## APIs
 
@@ -20,9 +21,9 @@
 
 ## Domain
 
-- [Scoring Dimensions and Weight Profiles](domain/scoring-dimensions.md) — 8 evaluation dimensions, domain-dependent weights, confidence scores, star-neutral value score, corroboration levels, hidden gem label (ScoringSettings single-source), derivation map, per-dimension confidence caps, coverage damping | Updated: 2026-04-26
+- [Scoring Dimensions and Weight Profiles](domain/scoring-dimensions.md) — 8 evaluation dimensions, domain-dependent weights, confidence scores, star-neutral value score, corroboration levels, hidden gem label (ScoringSettings single-source), derivation map, per-dimension confidence caps, coverage damping, per-profile derivation maps (T5.1), custom YAML/TOML profiles (T5.3) | Updated: 2026-04-26
 - [Discovery Channels and Strategies](domain/discovery-channels.md) — 6 discovery channels: Search, Code Search, Dependency, Registry, Awesome Lists, Seed Expansion | Updated: 2026-04-22
-- [Screening Gates Detail](domain/screening-gates.md) — Gate 1 metadata sub-scores, Gate 2 static/security sub-scores, tool integrations, hard gate enforcement | Updated: 2026-04-22
+- [Screening Gates Detail](domain/screening-gates.md) — Gate 1 metadata sub-scores, Gate 2 static/security sub-scores, degraded-mode handling, typed fetch errors, and hard gate enforcement | Updated: 2026-04-26
 - [Competitive Landscape and Gap Analysis](domain/competitive-landscape.md) — Existing projects (github_repo_classifier, CHAOSS, OpenSSF, etc.) and the gap GitHub Discovery fills | Updated: 2026-04-22
 - [Domain Strategy and Repository Taxonomy](domain/domain-strategy.md) — Domain taxonomy (CLI, web_framework, data_tool, etc.), domain-specific weights and thresholds | Updated: 2026-04-22
 
@@ -31,7 +32,7 @@
 - [Session Workflow and Progressive Deepening](patterns/session-workflow.md) — Cross-session progressive deepening, session state, context compaction, progress notifications | Updated: 2026-04-22
 - [Agent Workflow Patterns](patterns/agent-workflows.md) — MCP prompt skills, standard agent workflow, CLI patterns, permission/security models | Updated: 2026-04-22
 - [Technology Stack Decisions](patterns/tech-stack.md) — Verified tech stack (Python 3.12+, FastAPI, Pydantic v2, httpx, MCP SDK), integrations, coding conventions | Updated: 2026-04-22
-- [Operational Rules and Workflow Standards](patterns/operational-rules.md) — Guiding principles, hard architecture constraints, error handling standards | Updated: 2026-04-22
+- [Operational Rules and Workflow Standards](patterns/operational-rules.md) — Guiding principles, hard architecture constraints, error handling standards, and retry/backoff policy | Updated: 2026-04-26
 - [Phase 0 Implementation Decisions](patterns/phase0-implementation.md) — Detailed implementation decisions for Phase 0: config architecture, exception hierarchy, session models, MCP spec models, logging, ruff/mypy/pytest configuration | Updated: 2026-04-22
 - [Python Development Tooling Configuration](patterns/dev-tooling-and-ci.md) — Context7-verified configurations for pydantic-settings, structlog, ruff, pytest, pre-commit, mypy | Updated: 2026-04-22
 - [MCP Server Environment Isolation Resilience](patterns/env-isolation-resilience.md) — Fix for pydantic-settings crash when MCP server is spawned from a foreign project directory with its own .env: extra='ignore' on all SettingsConfigDict, structlog None-logger safety, CWD-independent data paths | Updated: 2026-04-26
@@ -39,7 +40,7 @@
 - [Phase 2 Discovery Engine Implementation](patterns/phase2-discovery-plan.md) — Discovery Engine (Layer A) COMPLETE: REST/GraphQL clients, 6 discovery channels, orchestrator with scoring/dedup, SQLite pool manager, 320 tests | Updated: 2026-04-22
 - [Phase 3 Screening Implementation](patterns/phase3-screening-implementation.md) — Lightweight Quality Screening (Layer B) COMPLETE + VERIFIED: Gate 1 (7 metadata sub-scores) + Gate 2 (4 static/security sub-scores) + Policy Engine + hard gate enforcement + clone management + OSV API integration + 500 total tests | Updated: 2026-04-23
 - [Phase 4 Deep Assessment Implementation](patterns/phase4-assessment-implementation.md) — Deep Technical Assessment (Layer C) COMPLETE + VERIFIED: NanoGPT provider (instructor+openai), repomix packing, 8 dimension prompts with domain focus, cache TTL enforcement, budget controller, heuristic fallback, lang_analyzers, 230 assessment tests (863 total) | Updated: 2026-04-23
-- [Phase 5 Scoring & Ranking Implementation](patterns/phase5-scoring-implementation.md) — Scoring & Ranking (Layer D) COMPLETE + STAR-NEUTRAL REDESIGN + FASE 2 AUDIT REMEDIATION: ScoringEngine, 11 domain profiles, star-neutral ValueScoreCalculator, ConfidenceCalculator (weighted+penalty), Ranker (quality DESC, deterministic blake2b), FeatureStore (SQLite), HeuristicFallback, 1515 total tests | Updated: 2026-04-26
+- [Phase 5 Scoring & Ranking Implementation](patterns/phase5-scoring-implementation.md) — Scoring & Ranking (Layer D) COMPLETE + STAR-NEUTRAL REDESIGN + FASE 2 AUDIT REMEDIATION: ScoringEngine, 12 domain profiles, star-neutral ValueScoreCalculator, ConfidenceCalculator (weighted+penalty), Ranker (quality DESC, deterministic blake2b), FeatureStore (SQLite), HeuristicFallback, per-profile derivation maps (T5.1), custom YAML/TOML profiles (T5.3), 1587 total tests | Updated: 2026-04-26
 - [Phase 6 API & Worker Implementation](patterns/phase6-api-worker-plan.md) — API & Worker Infrastructure COMPLETE + VERIFIED: FastAPI app factory + lifespan, SQLite JobStore, AsyncTaskQueue, 3 worker types, 5 route groups, rate limiting + API key auth, OpenAPI docs, export (JSON/CSV/MD), 127 new tests (990 total) | Updated: 2026-04-23
 - [Phase 7 MCP Integration Implementation](patterns/phase7-mcp-plan.md) — MCP-Native Integration Layer COMPLETE + VERIFIED: FastMCP server (16 tools, 4 resources, 5 prompts), SessionManager (SQLite), CLI integration, progress notifications, context-efficient output, GitHub MCP composition, stdio+HTTP transports, 124 new MCP tests (1114 total) | Updated: 2026-04-23
 - [Phase 8 CLI Implementation Plan](patterns/phase8-cli-plan.md) — CLI (Batch + Agent-Friendly) COMPLETE + VERIFIED: typer app refactor to cli/ package, 6 pipeline commands, Rich output formatting (4 formats), streaming progress, session management, 82 new CLI tests (1199 total) | Updated: 2026-04-24

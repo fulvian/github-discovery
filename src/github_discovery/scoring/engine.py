@@ -79,6 +79,7 @@ _DERIVATION_MAP: dict[ScoreDimension, list[tuple[str, float]]] = {
 }
 
 _ALL_DIMENSIONS = list(ScoreDimension)
+_MAPPING_ENTRY_LENGTH = 2
 
 
 class ScoringEngine:
@@ -111,7 +112,9 @@ class ScoringEngine:
         """
         self._settings = settings or ScoringSettings()
         self._store = store
-        self._registry = ProfileRegistry()
+        self._registry = ProfileRegistry(
+            custom_profiles_path=self._settings.custom_profiles_path or None,
+        )
         self._confidence_calc = ConfidenceCalculator()
         self._value_calc = ValueScoreCalculator(self._settings)
 
@@ -142,7 +145,11 @@ class ScoringEngine:
         if profile is None:
             profile = self._registry.get(candidate.domain)
 
-        dimension_infos = self._compute_dimension_scores(screening, assessment)
+        dimension_infos = self._compute_dimension_scores(
+            screening,
+            assessment,
+            profile,
+        )
         raw_quality_score, coverage = self._apply_weights(dimension_infos, profile)
         # Penalize low-coverage scores conservatively (max 50% damping):
         # coverage 1.0 → no damping; coverage 0.6 → score *= 0.8
@@ -279,6 +286,7 @@ class ScoringEngine:
         self,
         screening: ScreeningResult | None,
         assessment: DeepAssessmentResult | None,
+        profile: DomainProfile | None = None,
     ) -> dict[ScoreDimension, DimensionScoreInfo]:
         """Compute per-dimension scores from available data.
 
@@ -287,7 +295,8 @@ class ScoringEngine:
         2. No Gate 3 → derive from Gate 1+2 (lower confidence)
         3. No data → neutral 0.5, confidence 0.0
         """
-        derived = self._derive_from_screening(screening)
+        derivation = self._resolve_derivation_map(profile)
+        derived = self._derive_from_screening(screening, profile)
         result: dict[ScoreDimension, DimensionScoreInfo] = {}
 
         for dim in _ALL_DIMENSIONS:
@@ -311,7 +320,10 @@ class ScoringEngine:
                     value=derived[dim],
                     confidence=0.4,
                     source="gate12_derived",
-                    contributing_signals=self._get_contributing_signals(dim),
+                    contributing_signals=self._get_contributing_signals(
+                        dim,
+                        derivation,
+                    ),
                 )
                 continue
 
@@ -329,19 +341,24 @@ class ScoringEngine:
     def _derive_from_screening(
         self,
         screening: ScreeningResult | None,
+        profile: DomainProfile | None = None,
     ) -> dict[ScoreDimension, float]:
         """Derive preliminary dimension scores from Gate 1+2.
 
         Maps sub-scores to dimensions using weighted composition.
         Returns empty for dimensions that can't be derived (FUNCTIONALITY, INNOVATION).
+
+        When profile has a custom derivation_map (T5.1), uses that instead
+        of the module-level default.
         """
         if screening is None:
             return {}
 
+        derivation = self._resolve_derivation_map(profile)
         sub_scores = self._collect_sub_scores(screening)
         result: dict[ScoreDimension, float] = {}
 
-        for dim, mappings in _DERIVATION_MAP.items():
+        for dim, mappings in derivation.items():
             if not mappings:
                 continue
             total_weight = 0.0
@@ -354,6 +371,42 @@ class ScoringEngine:
                 result[dim] = weighted_sum / total_weight
 
         return result
+
+    def _resolve_derivation_map(
+        self,
+        profile: DomainProfile | None,
+    ) -> dict[ScoreDimension, list[tuple[str, float]]]:
+        """Resolve the derivation map to use for scoring.
+
+        Priority: profile.derivation_map > module-level _DERIVATION_MAP.
+
+        Profile derivation_map uses JSON-friendly format:
+            {"dimension_name": [["sub_score", 0.5], ...]}
+        This method converts it to the internal typed format.
+        """
+        if profile is not None and profile.derivation_map is not None:
+            # Start with defaults, then overlay profile-specific entries
+            resolved: dict[ScoreDimension, list[tuple[str, float]]] = dict(_DERIVATION_MAP)
+            for dim_name, mappings in profile.derivation_map.items():
+                try:
+                    dim = ScoreDimension(dim_name)
+                except ValueError:
+                    logger.warning(
+                        "unknown_dimension_in_derivation_map",
+                        dimension=dim_name,
+                        profile=profile.domain_type.value,
+                    )
+                    continue
+                parsed: list[tuple[str, float]] = []
+                for entry in mappings:
+                    if isinstance(entry, list) and len(entry) == _MAPPING_ENTRY_LENGTH:
+                        sub_name = str(entry[0])
+                        weight = float(entry[1])
+                        parsed.append((sub_name, weight))
+                if parsed:
+                    resolved[dim] = parsed
+            return resolved
+        return _DERIVATION_MAP
 
     def _collect_sub_scores(self, screening: ScreeningResult) -> dict[str, float]:
         """Collect all sub-scores from screening result."""
@@ -408,9 +461,13 @@ class ScoringEngine:
         coverage = total_weight_used / total_weight_possible if total_weight_possible > 0 else 0.0
         return raw_score, coverage
 
-    def _get_contributing_signals(self, dim: ScoreDimension) -> list[str]:
+    def _get_contributing_signals(
+        self,
+        dim: ScoreDimension,
+        derivation: dict[ScoreDimension, list[tuple[str, float]]] | None = None,
+    ) -> list[str]:
         """Get the sub-score names that contribute to a dimension."""
-        mappings = _DERIVATION_MAP.get(dim, [])
+        mappings = (derivation or _DERIVATION_MAP).get(dim, [])
         return [name for name, _ in mappings]
 
     def _extract_gate1_total(self, screening: ScreeningResult | None) -> float:

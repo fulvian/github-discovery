@@ -77,6 +77,33 @@ class TestCrossDomainGuard:
         scores = [r.normalized_value_score for r in comparison.results]
         assert scores == sorted(scores, reverse=True)
 
+    def test_normalized_value_matches_normalized_quality(self) -> None:
+        """value_score normalization mirrors quality normalization (star-neutral)."""
+        guard = CrossDomainGuard()
+        results = [
+            _make_score_result(full_name="repo/a", domain=DomainType.LIBRARY, quality_score=0.9),
+            _make_score_result(full_name="repo/b", domain=DomainType.LIBRARY, quality_score=0.5),
+            _make_score_result(full_name="repo/c", domain=DomainType.LIBRARY, quality_score=0.3),
+            _make_score_result(full_name="repo/d", domain=DomainType.CLI, quality_score=0.8),
+            _make_score_result(full_name="repo/e", domain=DomainType.CLI, quality_score=0.6),
+            _make_score_result(full_name="repo/f", domain=DomainType.CLI, quality_score=0.4),
+        ]
+        comparison = guard.compare(results)
+
+        for normalized in comparison.results:
+            assert normalized.normalized_value_score == normalized.normalized_quality
+
+    def test_cross_domain_confidence_zero_when_insufficient_domain_samples(self) -> None:
+        """When each domain has <3 repos, normalization confidence should be 0."""
+        guard = CrossDomainGuard()
+        results = [
+            _make_score_result(full_name="repo/lib", domain=DomainType.LIBRARY, quality_score=0.8),
+            _make_score_result(full_name="repo/cli", domain=DomainType.CLI, quality_score=0.6),
+        ]
+        comparison = guard.compare(results)
+        assert comparison.is_cross_domain is True
+        assert comparison.cross_domain_confidence == 0.0
+
     def test_warning_disabled(self) -> None:
         """Warning can be disabled via settings."""
         from github_discovery.config import ScoringSettings
