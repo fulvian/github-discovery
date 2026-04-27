@@ -120,8 +120,8 @@ class AssessmentSettings(BaseSettings):
 
     # Repomix packing settings
     repomix_max_tokens: int = Field(
-        default=80000,
-        description="Max tokens for repomix packed output",
+        default=20000,
+        description="Max tokens for repomix repo packing (lower = faster assessment)",
     )
     repomix_compression: bool = Field(
         default=True,

@@ -42,6 +42,11 @@ logger = structlog.get_logger(__name__)
 
 _MAX_CONCURRENT = 3  # Conservative concurrency for LLM calls
 
+# Maximum content length sent to the LLM for batch assessment.
+# ~10K chars ≈ 2.5K tokens — quality signals are in structure, not volume.
+# GLM-5.1 processes this size in ~30s; larger contexts cause timeouts.
+_MAX_LLM_CONTENT_CHARS = 10_000
+
 
 class AssessmentOrchestrator:
     """Coordinates the Gate 3 deep assessment pipeline.
@@ -219,6 +224,16 @@ class AssessmentOrchestrator:
             # Step 5: Heuristic scoring
             heuristic_scores = self._heuristic.analyze(repo_content)
 
+            # Step 5b: Truncate content for LLM if needed
+            llm_content = repo_content.content
+            if len(llm_content) > _MAX_LLM_CONTENT_CHARS:
+                log.debug(
+                    "llm_content_truncated",
+                    original_chars=len(llm_content),
+                    max_chars=_MAX_LLM_CONTENT_CHARS,
+                )
+                llm_content = llm_content[:_MAX_LLM_CONTENT_CHARS]
+
             # Step 6: LLM assessment
             provider = await self._ensure_provider()
 
@@ -226,7 +241,7 @@ class AssessmentOrchestrator:
                 result = await self._assess_batch(
                     provider,
                     candidate,
-                    repo_content.content,
+                    llm_content,
                     heuristic_scores,
                     context,
                 )
@@ -234,7 +249,7 @@ class AssessmentOrchestrator:
                 result = await self._assess_per_dimension(
                     provider,
                     candidate,
-                    repo_content.content,
+                    llm_content,
                     heuristic_scores,
                     context,
                 )

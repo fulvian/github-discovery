@@ -64,7 +64,14 @@ class LLMProvider:
             base_url=base_url,
             api_key=api_key,
         )
-        self._client = instructor.from_openai(self._openai_client)
+        # MD_JSON mode: GLM-5.1 and similar models serialize nested Pydantic
+        # objects as JSON strings in tool_call arguments, causing validation
+        # errors with the default TOOLS mode. MD_JSON extracts JSON from
+        # markdown code blocks — more tolerant of model quirks.
+        self._client = instructor.from_openai(
+            self._openai_client,
+            mode=instructor.Mode.MD_JSON,
+        )
 
         logger.debug(
             "llm_provider_initialized",
