@@ -94,7 +94,7 @@ class AssessmentSettings(BaseSettings):
         description="NanoGPT API base URL (OpenAI-compatible)",
     )
     llm_model: str = Field(
-        default="gpt-4o",
+        default="zai-org/glm-5.1",
         description="LLM model identifier for NanoGPT",
     )
     llm_temperature: float = Field(
@@ -110,8 +110,8 @@ class AssessmentSettings(BaseSettings):
         description="Max retries for LLM API calls via instructor",
     )
     llm_fallback_model: str = Field(
-        default="anthropic/claude-sonnet-4-20250514",
-        description="Fallback model if primary fails",
+        default="zai-org/glm-5.1:thinking",
+        description="Fallback model if primary fails (thinking for deeper analysis)",
     )
     llm_subscription_mode: bool = Field(
         default=True,
