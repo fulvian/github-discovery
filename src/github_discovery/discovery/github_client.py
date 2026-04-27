@@ -40,14 +40,16 @@ _GITHUB_API_VERSION = "2022-11-28"
 _GITHUB_ACCEPT = "application/vnd.github+json"
 
 # Default thresholds
-_RATE_LIMIT_LOW_WATERMARK = 10  # Wait when remaining < this (was 50 — too aggressive)
-_SEARCH_RATE_LIMIT_LOW_WATERMARK = 3
+_RATE_LIMIT_LOW_WATERMARK = 5  # Reduced from 10 — less aggressive, save requests
+_SEARCH_RATE_LIMIT_LOW_WATERMARK = 2  # Reduced from 3 — 30/min search limit
 _DEFAULT_PER_PAGE = 100
 _DEFAULT_MAX_PAGES = 10
 _RETRY_BACKOFF_BASE = 1.0  # seconds
 _RETRY_MAX_ATTEMPTS = 5  # Increased from 3
 _RETRY_MAX_WAIT = 60.0  # Max seconds to wait between retries
 _JITTER_FACTOR = 0.5  # Random jitter: ±50% of wait time
+# Smart throttle: cap on maximum wait when rate limited
+_DEFAULT_RATE_LIMIT_WAIT_CAP = 30.0  # GitHub best practice: 30s cap
 
 # HTTP status codes
 _HTTP_OK_MIN = 200
@@ -86,18 +88,24 @@ class GitHubRestClient:
     - Link-header pagination with safety limits
     - Separate rate limit awareness for search endpoints (30/min)
       and code search endpoints (10/min)
+    - Adaptive throttling via asyncio.Semaphore when rate limits are low
     """
 
     def __init__(self, settings: GitHubSettings) -> None:
         """Initialize the client with GitHub settings."""
         self._settings = settings
         self._base_url = settings.api_base_url.rstrip("/")
+        self._rate_limit_wait_cap = settings.rate_limit_wait_cap_seconds
 
         # Rate limit state
         self._core_remaining: int | None = None
         self._core_reset_at: datetime | None = None
         self._search_remaining: int | None = None
         self._search_reset_at: datetime | None = None
+
+        # Adaptive throttling: semaphore limits concurrent requests when rate limit is low
+        self._throttle_semaphore: asyncio.Semaphore | None = None
+        self._throttle_lock = asyncio.Lock()
 
         auth = _BearerAuth(settings.token) if settings.token else None
         transport = httpx.AsyncHTTPTransport(retries=3)
@@ -143,6 +151,12 @@ class GitHubRestClient:
         Instead of raising, this method waits until the rate limit resets
         or until a safe number of requests is available. Uses exponential
         backoff with jitter to avoid thundering herd.
+
+        Smart throttle behavior:
+        - When remaining < watermark, wait up to _rate_limit_wait_cap seconds
+        - On next call within same low-watermark period, reduce concurrency
+          via asyncio.Semaphore (adaptive throttling)
+        - Never wait full reset time — GitHub best practice is 30s cap
         """
         if is_search:
             remaining = self._search_remaining
@@ -158,24 +172,30 @@ class GitHubRestClient:
             return
 
         if remaining >= watermark:
+            # Rate limit is healthy — reset throttle if active
+            await self._reset_throttle()
             return
 
-        # Rate limit is low. Determine the wait time.
+        # Rate limit is low (< watermark). Wait and activate throttle.
         wait_seconds: float
 
         if reset_at is not None:
-            # GitHub told us when it resets — wait until then
+            # GitHub told us when it resets — wait until then (capped)
             now = datetime.now(tz=UTC)
             if reset_at > now:
                 wait_seconds = (reset_at - now).total_seconds()
+                # CAP: never wait more than configured cap (default 30s)
+                # GitHub best practice: don't wait full reset, use exponential backoff
+                capped_wait = min(wait_seconds, self._rate_limit_wait_cap)
                 logger.info(
                     "github_rate_limit_low_awaiting_reset",
                     remaining=remaining,
                     reset_at=reset_at.isoformat(),
-                    wait_seconds=wait_seconds,
+                    wait_seconds=capped_wait,
+                    capped_from_seconds=wait_seconds,
                     is_search=is_search,
                 )
-                await asyncio.sleep(min(wait_seconds, _RETRY_MAX_WAIT))
+                await asyncio.sleep(capped_wait)
         else:
             # No reset time known — use exponential backoff
             wait_seconds = _RETRY_BACKOFF_BASE
@@ -186,6 +206,35 @@ class GitHubRestClient:
                 is_search=is_search,
             )
             await asyncio.sleep(wait_seconds)
+
+        # After waiting, activate adaptive throttling to reduce concurrency
+        await self._activate_throttle(is_search=is_search)
+
+    async def _activate_throttle(self, *, is_search: bool) -> None:
+        """Activate adaptive throttling by reducing semaphore permits.
+
+        When rate limit is low, we reduce concurrent requests to avoid
+        hitting the limit harder. The semaphore limits how many requests
+        can be in-flight simultaneously.
+        """
+        async with self._throttle_lock:
+            if self._throttle_semaphore is None:
+                # Create with 3 permits (was 5 concurrent) — reduces API pressure
+                self._throttle_semaphore = asyncio.Semaphore(3)
+                logger.warning(
+                    "adaptive_throttling_activated",
+                    permits=3,
+                    is_search=is_search,
+                    core_remaining=self._core_remaining,
+                    search_remaining=self._search_remaining,
+                )
+
+    async def _reset_throttle(self) -> None:
+        """Reset throttle when rate limit recovers."""
+        async with self._throttle_lock:
+            if self._throttle_semaphore is not None:
+                self._throttle_semaphore = None
+                logger.info("adaptive_throttling_reset")
 
     def _check_rate_limit(self, *, is_search: bool = False) -> bool:
         """Check if rate limit is low (for synchronous pre-request guard).
@@ -257,8 +306,8 @@ class GitHubRestClient:
                             else:
                                 self._core_reset_at = reset_ts
 
-                    # Calculate backoff with jitter
-                    backoff = min(_RETRY_BACKOFF_BASE * (2**attempt), _RETRY_MAX_WAIT)
+                    # Calculate backoff with jitter — capped per GitHub best practice
+                    backoff = min(_RETRY_BACKOFF_BASE * (2**attempt), self._rate_limit_wait_cap)
                     jitter = backoff * _JITTER_FACTOR
                     wait_time = max(1.0, backoff + random.uniform(-jitter, jitter))  # noqa: S311
 
@@ -275,7 +324,7 @@ class GitHubRestClient:
                 return response
 
             except RateLimitError as e:
-                backoff = min(_RETRY_BACKOFF_BASE * (2**attempt), _RETRY_MAX_WAIT)
+                backoff = min(_RETRY_BACKOFF_BASE * (2**attempt), self._rate_limit_wait_cap)
                 jitter = backoff * _JITTER_FACTOR
                 wait_time = max(1.0, backoff + random.uniform(-jitter, jitter))  # noqa: S311
 
@@ -638,20 +687,34 @@ class GitHubRestClient:
 
         Maps HTTP status codes to typed exceptions before raising,
         so tenacity only retries on retryable error types.
+
+        Adaptive throttling: when throttle semaphore is active (rate limit low),
+        we wait/acquire before making a request to reduce API pressure.
         """
         await self._await_if_rate_limited(is_search=is_search)
-        response = await self._client.get(url, params=params, headers=headers)
-        await self._track_rate_limits(response)
 
-        typed_error = self._map_status_error(response)
-        if typed_error is not None:
-            if (
-                isinstance(typed_error, GitHubRateLimitError)
-                and typed_error.retry_after is not None
-            ):
-                await asyncio.sleep(max(1, min(typed_error.retry_after, int(_RETRY_MAX_WAIT))))
-            raise typed_error
-        return response
+        # Adaptive throttle: acquire semaphore if active (limits concurrent requests)
+        if self._throttle_semaphore is not None:
+            await self._throttle_semaphore.acquire()
+
+        try:
+            response = await self._client.get(url, params=params, headers=headers)
+            await self._track_rate_limits(response)
+
+            typed_error = self._map_status_error(response)
+            if typed_error is not None:
+                if (
+                    isinstance(typed_error, GitHubRateLimitError)
+                    and typed_error.retry_after is not None
+                ):
+                    cap = int(self._rate_limit_wait_cap)
+                    await asyncio.sleep(max(1, min(typed_error.retry_after, cap)))
+                raise typed_error
+            return response
+        finally:
+            # Always release semaphore after request
+            if self._throttle_semaphore is not None:
+                self._throttle_semaphore.release()
 
     async def __aenter__(self) -> GitHubRestClient:
         """Enter async context."""

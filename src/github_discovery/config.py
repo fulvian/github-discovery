@@ -27,6 +27,14 @@ class GitHubSettings(BaseSettings):
     )
     request_timeout: int = Field(default=30, description="HTTP request timeout in seconds")
     max_concurrent_requests: int = Field(default=10, description="Max concurrent API requests")
+    rate_limit_wait_cap_seconds: float = Field(
+        default=30.0,
+        description=(
+            "Maximum seconds to wait when GitHub API rate limit is low. "
+            "GitHub best practice: don't wait more than 30s before retry. "
+            "Exponential backoff will continue for remaining wait time."
+        ),
+    )
 
 
 class DiscoverySettings(BaseSettings):
@@ -42,6 +50,24 @@ class DiscoverySettings(BaseSettings):
     default_channels: list[str] = Field(
         default=["search", "registry", "curated"],
         description="Default discovery channels",
+    )
+    mega_popular_star_threshold: int | None = Field(
+        default=100_000,
+        description=(
+            "Stars threshold above which repos are excluded from Search API results "
+            "to reduce noise from over-represented mega-popular projects. "
+            "Set to None (empty env var) to disable (full star-neutrality). "
+            "This is NOT a quality penalty — quality is evaluated independently."
+        ),
+    )
+    code_search_max_pages: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description=(
+            "Max pages to fetch from GitHub Code Search API. "
+            "Default 1 is conservative; raise to 3 for broader coverage."
+        ),
     )
 
 
@@ -82,6 +108,14 @@ class AssessmentSettings(BaseSettings):
     daily_soft_limit: int = Field(
         default=2000000,
         description="Soft daily token limit for monitoring (warning only, not blocking)",
+    )
+    hard_daily_limit: int = Field(
+        default=0,
+        description=(
+            "Hard daily token limit that blocks assessments when exceeded. "
+            "Default 0 means disabled (unlimited). Set to e.g. 500000 to block "
+            "after 500k tokens/day."
+        ),
     )
 
     # NanoGPT provider settings

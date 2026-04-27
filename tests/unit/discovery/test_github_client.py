@@ -10,6 +10,9 @@ from pytest_httpx import HTTPXMock
 from github_discovery.config import GitHubSettings
 from github_discovery.discovery.github_client import GitHubRestClient
 
+# Test token — not a real credential (S105 suppressed for test fixtures)
+_TEST_TOKEN = "ghp_test_token_for_ratelimit_cap"  # noqa: S105
+
 # --- Fixtures ---
 
 
@@ -33,7 +36,7 @@ def rate_limit_headers_ok() -> dict[str, str]:
 def rate_limit_headers_low() -> dict[str, str]:
     """Rate limit headers indicating near-exhaustion."""
     return {
-        "x-ratelimit-remaining": "5",
+        "x-ratelimit-remaining": "4",  # 4 < watermark(5) → triggers wait
         "x-ratelimit-limit": "5000",
         "x-ratelimit-reset": "1700001000",
     }
@@ -457,3 +460,241 @@ class Test403RateLimitResponse:
             async with client:
                 result = await client.get("/test")
                 assert result.status_code == 200
+
+
+class TestAdaptiveThrottling:
+    """Tests for adaptive throttling via asyncio.Semaphore."""
+
+    async def test_throttle_activates_after_rate_limit_detected(
+        self,
+        httpx_mock: HTTPXMock,
+        github_settings: GitHubSettings,
+    ) -> None:
+        """Throttle activates on second request once rate limit is detected.
+
+        On first request, _core_remaining is None so we don't wait.
+        After first response, _core_remaining is set (low). On second
+        request, _await_if_rate_limited sees low remaining and activates throttle.
+        """
+        client = GitHubRestClient(github_settings)
+        # First request: no rate limit header → remaining stays None
+        httpx_mock.add_response(
+            url="https://api.github.com/first",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "4",  # Set to low after first response
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1700001000",
+            },
+        )
+        # Second request: after low remaining detected, throttle activates
+        httpx_mock.add_response(
+            url="https://api.github.com/second",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "3",  # Still low
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1700001000",
+            },
+        )
+
+        with patch(
+            "github_discovery.discovery.github_client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            async with client:
+                # First request: no rate limit knowledge, no wait
+                await client.get("/first")
+                assert client._throttle_semaphore is None  # Not activated yet
+                # Second request: knows remaining=4 < 5, activates throttle
+                await client.get("/second")
+                assert client._throttle_semaphore is not None
+
+    async def test_throttle_resets_when_rate_limit_recovers(
+        self,
+        httpx_mock: HTTPXMock,
+        github_settings: GitHubSettings,
+    ) -> None:
+        """When rate limit recovers, throttle semaphore resets on NEXT request.
+
+        Throttle resets on the next request (not current) because _track_rate_limits
+        is called after _await_if_rate_limited. So we need 2 requests with healthy
+        remaining to fully reset: one to detect recovery, one to actually reset.
+        """
+        client = GitHubRestClient(github_settings)
+        # First: low rate limit → throttle activates
+        httpx_mock.add_response(
+            url="https://api.github.com/first",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "4",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1700001000",
+            },
+        )
+        # Second: still low
+        httpx_mock.add_response(
+            url="https://api.github.com/second",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "3",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1700001000",
+            },
+        )
+        # Third: healthy → throttle still active (resets on NEXT call)
+        httpx_mock.add_response(
+            url="https://api.github.com/third",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "4990",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1700002000",
+            },
+        )
+        # Fourth: sees healthy remaining → resets throttle
+        httpx_mock.add_response(
+            url="https://api.github.com/fourth",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "4980",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1700003000",
+            },
+        )
+
+        with patch(
+            "github_discovery.discovery.github_client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            async with client:
+                await client.get("/first")  # Initialize, no throttle yet
+                await client.get("/second")  # Throttle activates
+                assert client._throttle_semaphore is not None
+                await client.get("/third")  # Still active (resets NEXT request)
+                assert client._throttle_semaphore is not None
+                await client.get("/fourth")  # Now sees healthy remaining → resets
+                assert client._throttle_semaphore is None
+
+    async def test_wait_cap_applied_in_await_if_rate_limited(
+        self,
+        httpx_mock: HTTPXMock,
+        github_settings: GitHubSettings,
+    ) -> None:
+        """When reset is far future, wait should be capped to configured value."""
+        client = GitHubRestClient(github_settings)
+        # First request sets low remaining with far-future reset
+        httpx_mock.add_response(
+            url="https://api.github.com/first",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "4",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1800000000",  # Far future
+            },
+        )
+        # Second request: sees low remaining with far reset, caps wait
+        httpx_mock.add_response(
+            url="https://api.github.com/second",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "3",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1800000000",
+            },
+        )
+
+        sleep_mock = AsyncMock()
+        with patch(
+            "github_discovery.discovery.github_client.asyncio.sleep",
+            sleep_mock,
+        ):
+            async with client:
+                await client.get("/first")  # Initialize remaining
+                await client.get("/second")  # Should cap wait to 30s
+                # Should have slept with capped wait (default 30s)
+                sleep_mock.assert_called()
+                call_arg = sleep_mock.call_args[0][0]
+                assert call_arg <= 30.0  # Capped to rate_limit_wait_cap_seconds
+
+    async def test_wait_cap_configurable_via_settings(
+        self,
+        httpx_mock: HTTPXMock,
+    ) -> None:
+        """Rate limit wait cap should be configurable via settings."""
+        settings = GitHubSettings(
+            token=_TEST_TOKEN,
+            rate_limit_wait_cap_seconds=10.0,  # Custom cap
+        )
+        client = GitHubRestClient(settings)
+        # First request: initialize remaining
+        httpx_mock.add_response(
+            url="https://api.github.com/first",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "4",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1800000000",
+            },
+        )
+        # Second request: capped to 10s
+        httpx_mock.add_response(
+            url="https://api.github.com/second",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "3",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1800000000",
+            },
+        )
+
+        sleep_mock = AsyncMock()
+        with patch(
+            "github_discovery.discovery.github_client.asyncio.sleep",
+            sleep_mock,
+        ):
+            async with client:
+                await client.get("/first")  # Initialize
+                await client.get("/second")  # Should cap wait to 10s
+                sleep_mock.assert_called()
+                call_arg = sleep_mock.call_args[0][0]
+                assert call_arg <= 10.0  # Custom cap
+
+    async def test_semaphore_limits_concurrent_requests_when_throttled(
+        self,
+        httpx_mock: HTTPXMock,
+        github_settings: GitHubSettings,
+    ) -> None:
+        """When throttle is active, semaphore should limit concurrent requests."""
+        client = GitHubRestClient(github_settings)
+        # First: sets low remaining
+        httpx_mock.add_response(
+            url="https://api.github.com/first",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "4",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1700001000",
+            },
+        )
+        # Second: throttle activates
+        httpx_mock.add_response(
+            url="https://api.github.com/second",
+            json={"ok": True},
+            headers={
+                "x-ratelimit-remaining": "3",
+                "x-ratelimit-limit": "5000",
+                "x-ratelimit-reset": "1700001000",
+            },
+        )
+
+        with patch(
+            "github_discovery.discovery.github_client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            async with client:
+                await client.get("/first")  # Initialize
+                await client.get("/second")  # Throttle activates
+                assert client._throttle_semaphore is not None
+                # Semaphore should have 3 permits (reduced from 5)
+                assert client._throttle_semaphore._value == 3
