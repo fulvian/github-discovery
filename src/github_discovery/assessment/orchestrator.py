@@ -138,6 +138,8 @@ class AssessmentOrchestrator:
         """Quick assess a single repo without full pool context.
 
         Used by MCP tool quick_assess for single-repo assessment.
+        Requires only Gate 1 (metadata) — no clone needed. This makes
+        the "quick" assessment actually quick.
 
         Args:
             candidate: Repo to assess.
@@ -153,7 +155,12 @@ class AssessmentOrchestrator:
             dimensions=dimensions or list(ScoreDimension),
             gate3_threshold=self._assessment_settings.gate3_threshold,
         )
-        result = await self._assess_candidate(candidate, screening, context=context)
+        result = await self._assess_candidate(
+            candidate,
+            screening,
+            context=context,
+            required_gates=1,
+        )
         return result
 
     async def _assess_candidate(
@@ -162,14 +169,22 @@ class AssessmentOrchestrator:
         screening: ScreeningResult | None,
         *,
         context: AssessmentContext,
+        required_gates: int = 2,
     ) -> DeepAssessmentResult:
-        """Assess a single candidate through the full Gate 3 pipeline."""
+        """Assess a single candidate through the full Gate 3 pipeline.
+
+        Args:
+            candidate: Repo to assess.
+            screening: Optional screening results.
+            context: Assessment context.
+            required_gates: Number of gates required (1=Gate 1 only, 2=Gate 1+2).
+        """
         full_name = candidate.full_name
         log = logger.bind(full_name=full_name)
         start_time = time.monotonic()
 
         # Step 1: Hard gate check
-        self._check_hard_gate(full_name, screening)
+        self._check_hard_gate(full_name, screening, required_gates=required_gates)
 
         # Step 2: Cache check
         cache_key = f"{full_name}:{candidate.commit_sha}"
@@ -358,26 +373,34 @@ class AssessmentOrchestrator:
         self,
         full_name: str,
         screening: ScreeningResult | None,
+        *,
+        required_gates: int = 2,
     ) -> None:
-        """Verify Gate 1 + Gate 2 passed before Gate 3.
+        """Verify required gates passed before Gate 3.
 
         Hard rule (Blueprint §16.5): no deep-scan LLM below
-        Gate 1+2 threshold.
-        """
-        if screening is None or not screening.can_proceed_to_gate3:
-            # Derive actual gate_passed from screening result
-            gate_passed = 0
-            if screening is not None:
-                if screening.gate2 is not None and screening.gate2.gate2_pass:
-                    gate_passed = 2
-                elif screening.gate1 is not None and screening.gate1.gate1_pass:
-                    gate_passed = 1
+        Gate 1+2 threshold for batch assess. For quick_assess,
+        only Gate 1 is required (no clone overhead).
 
+        Args:
+            full_name: Repository full name.
+            screening: Screening result (may be None).
+            required_gates: 1 = Gate 1 only, 2 = Gate 1+2 (default).
+        """
+        gate_passed = 0
+        if screening is not None:
+            if screening.gate2 is not None and screening.gate2.gate2_pass:
+                gate_passed = 2
+            elif screening.gate1 is not None and screening.gate1.gate1_pass:
+                gate_passed = 1
+
+        if gate_passed < required_gates:
             raise HardGateViolationError(
-                f"Gate 3 blocked for {full_name}: Gate 1+2 must pass before deep assessment",
+                f"Gate 3 blocked for {full_name}: "
+                f"Gate {required_gates} must pass before deep assessment",
                 repo_url=full_name,
                 gate_passed=gate_passed,
-                gate_required=2,
+                gate_required=required_gates,
             )
 
     @property
