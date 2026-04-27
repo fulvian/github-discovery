@@ -831,6 +831,29 @@ Real E2E testing of the full discovery pipeline (Gate 0 → Gate 3 → Ranking) 
 - `index.md` — updated 3 article descriptions
 - `log.md` — this entry
 
+## [2026-04-27] refactor | llm_provider.py — Extract _call_llm() helper
+
+Refactored `assessment/llm_provider.py` to eliminate massive code duplication between `assess_dimension()` and `assess_batch()`.
+
+**Problem**: Both methods had identical try/except/TimeoutError/fallback-model-retry patterns (~60 lines duplicated).
+
+**Solution**: Extracted generic `_call_llm()` private method (lines 95–160) that:
+- Takes `response_model`, `messages`, `context_label`, and optional `dimension` as parameters
+- Handles timeout via `asyncio.wait_for()`
+- On primary model failure, delegates to `_call_llm_fallback()` (lines 162–219) which retries with fallback model
+- Consistent error chain: primary failure → original error (preserved even on fallback failure)
+- `assess_dimension()` and `assess_batch()` now delegate entirely to `_call_llm()` (clean ~15-line bodies)
+
+**Changes**:
+- Added `TypeVar _T` at module level
+- Added `# type: ignore[type-var]` on `response_model=response_model` call sites (instructor's internal TypeVar conflicts with module-level `_T`)
+- Removed redundant `# type: ignore[return-value]` on return statements (mypy satisfied after type-var fix)
+
+**Verification**:
+- ruff check ✅ | ruff format ✅ | mypy --strict ✅ | pytest 22/22 llm_provider tests ✅ | 285/285 assessment tests ✅ | 31/31 orchestrator tests ✅
+
+**No functional changes** — behavior is identical to pre-refactoring code.
+
 ## [2026-04-27] ingest | Pipeline Bug Fixes Round 2 — 3 bugs found in E2E re-testing
 
 ### Overview
@@ -861,3 +884,122 @@ After fixing BUG 1-5, re-running the E2E pipeline revealed 3 additional bugs. Al
 - The running MCP server loads code at startup; subsequent edits don't auto-reload
 - E2E validation confirmed: quick_screen works (Gate 1=0.43 for pytest-dev/pytest), search channel returns results
 - Curated channel still returns old results in the running server (pre-BUG 2 code loaded)
+
+## [2026-04-27] ingest | E2E Pipeline Test Session 2 — pydantic domain
+- Full pipeline: Gate 0 discover "pydantic" → Gate 1+2 screen → Gate 3 deep-eval → Gate D rank
+- Pool: 20 repos (GitHub Search + PyPI Registry + awesome-list), pool-id 2db1e59b-4262-4698-832a-e3d071c5744f
+- Gate 1: 12/20 passed (60%) — pydantic/pydantic top scorer (0.72)
+- Gate 2: 1/12 passed (8.3%) — only pydantic/pydantic (0.52). Root cause: `gitleaks`/`scc` NOT installed → fallback 0.3 each → composite ~0.40 (< 0.50 threshold)
+- Gate 3: 2 repos assessed — pydantic/pydantic (overall=0.6825, pass) and koxudaxi/fastapi-code-generator (overall=0.58, fail)
+- Gate D ranking: pydantic/pydantic #1 (quality=0.68), fastapi-code-generator #2 (quality=0.58) — star-neutral confirmed
+- Key issues: content truncation (4000 chars/LLM call for 243K-token repo), heuristic `has_ci=False` for both repos, LLM confidence at floor (0.30), Repomix timeout for repos >1M tokens
+- Created test_report_2.md with full E2E analysis
+
+## [2026-04-27] ingest | Production Readiness v1 — Assessment Improvements Complete
+
+Implemented all Production Readiness v1 deliverables from `docs/plans/discovery_production_ready_plan_1.md`:
+
+### TE2: Persistent Assessment Cache (FeatureStore)
+- `assessment_results` table with full schema: `repo_url, repo_name, stars, overall_quality, overall_confidence, degraded, dimensions_json, created_at, expires_at`
+- `put_assessment()`, `get_assessment()`, `get_assessment_batch()`, `delete_assessment()`
+- `_serialize_assessment_dimensions()` / `_row_to_assessment()` for complete `DimensionScore` array serialization
+- `AssessmentOrchestrator` accepts `feature_store: FeatureStore | None`; results loaded from persistent store on init
+- MCP server updated to pass `feature_store` to orchestrator
+
+### TE3: Hard Daily Limit
+- `AssessmentSettings.hard_daily_limit: int` (env: `GHDISC_ASSESSMENT_HARD_DAILY_LIMIT`, default=0=disabled)
+- `BudgetController` accepts and applies the limit; `check_daily_soft_limit()` first checks hard limit and raises `BudgetExceededError(budget_type="daily_hard")` when exceeded
+- Confirmed: persistent cache (TE2) makes hard daily limit viable — cross-session resume eliminates the "lost work" problem
+
+### TF1: Enhanced Rank CLI Columns
+- `ScoreResult.degraded: bool | None` field added
+- SQL schema migration for `degraded` column in `feature_store.py`
+- `ScoringEngine.score()` passes `degraded=assessment.degraded`
+- CLI `rank` output includes `coverage`, `degraded`, `gate3` columns
+
+### TF2: Session Report Script
+- `scripts/generate_session_report.py` — generates markdown reports from session IDs
+- Supports `--session-id`, `--db-path`, `--output`; reports status, progress counts, pool IDs, configuration overrides
+
+### TF3: Wiki Updates (2 of 4 files complete)
+- Updated `patterns/phase4-assessment-implementation.md` — appended Production Readiness v1 section
+- Updated `patterns/phase5-scoring-implementation.md` — appended Wave 6 (Production Readiness v1) section
+- Updated `patterns/operational-rules.md` — added hard daily limit, persistent cache, content strategy sections
+- Updated `domain/screening-gates.md` — added `ScoreResult.degraded` flag section
+
+### Pre-existing Ruff Issues Fixed
+- TC001 (TYPE_CHECKING import in `content_strategy.py`)
+- PLR2004 (magic values in `content_strategy.py`)
+- D107/D105 (missing docstrings in `content_strategy.py`)
+- T201 (`print` in `doctor.py` fallback)
+- PLC0415 (inline import in `code_search_channel.py`)
+- PLW0603 (`global` statement in `domain_classifier.py`)
+
+### Files Changed
+- `assessment/orchestrator.py` — FeatureStore integration
+- `assessment/budget_controller.py` — hard_daily_limit enforcement
+- `assessment/content_strategy.py` — TF3 ruff fixes
+- `scoring/feature_store.py` — TE2 assessment cache + TF1 degraded field
+- `scoring/engine.py` — TF1 degraded field propagation
+- `scoring/models.py` / `models/scoring.py` — TF1 degraded field
+- `config.py` — TE3 hard_daily_limit setting
+- `cli/rank.py` — TF1 enhanced columns
+- `discovery/code_search_channel.py` — ruff PLC0415 fix
+- `discovery/domain_classifier.py` — ruff PLW0603 fix
+- `cli/doctor.py` — ruff T201 fix
+- `scripts/generate_session_report.py` — TF2 new script
+- `tests/` — 8 updated test files
+
+### Status
+- 1476 tests passing, ruff clean, mypy --strict clean
+
+## [2026-04-27] ingest | Production Readiness v1 — Wave Completion + v0.3.0-beta Hardening
+Completed all remaining tasks from Production Readiness Plan v1 to reach v0.3.0-beta:
+
+### TB4: SubprocessRunner tool-warning deduplication
+- `SubprocessRunner` now tracks `_unavailable_tools: set[str]` — first missing-tool call logs `WARNING`, subsequent calls log `DEBUG`
+
+### TE4: Exception audit
+- `assessment/orchestrator.py` `_assess_candidate`: re-raises `KeyboardInterrupt`, `SystemExit`, `MemoryError` before wrapping other exceptions in `AssessmentError`
+- `gate2_static.py` `_clone_repo`: already hardened (OSError + generic Exception with error-level logging)
+
+### Adaptive Content Truncation (TC1 fix)
+- Removed hardcoded `_MAX_LLM_CONTENT_CHARS = 4_000` from `orchestrator.py`
+- Content stride now uses `ContentStrategyResult.max_chars` per size tier (80K–240K)
+
+### New tests: +51 (1619 → 1670)
+- `tests/unit/assessment/test_content_strategy.py` — 24 tests: tier classification, char limits, token estimation, sampling
+- `tests/unit/discovery/test_domain_classifier.py` — 18 tests: topic/language/description rules for all domain types
+- `tests/unit/cli/test_doctor.py` — 9 tests: individual check functions
+- `tests/unit/screening/test_subprocess_runner.py` — 4 new tests: TB4 dedup behavior
+- `tests/unit/assessment/test_orchestrator.py` — 3 new tests: KeyboardInterrupt/MemoryError passthrough, AssessmentError wrapping; 2 adaptive content truncation tests
+
+### Wiki: 6 files updated
+- `architecture/phase3-production-readiness.md` — NEW: decision log for Waves A–F
+- `index.md` — added Phase 3 entry
+- `log.md` — this entry
+
+### CI status
+- 1670 tests, ruff clean, mypy --strict clean
+
+## [2026-04-27] fix | Smart GitHub API rate limit handling — cap wait at 30s + adaptive throttle
+
+**Problem**: Gate 1+2 screening blocked for ~60 minutes when rate limit was low. Root cause:
+- `_await_if_rate_limited()` waited for full reset instead of capping wait
+- Watermarks too aggressive: core=10 (too sensitive), search=3
+- No concurrency reduction when throttle was active
+
+**Solution** (Context7 + Brave verified GitHub best practices):
+1. **Lower watermarks**: core 5 (was 10), search 2 (was 3) — less aggressive
+2. **Cap wait to 30s**: `rate_limit_wait_cap_seconds` config (default 30, GitHub best practice)
+3. **Adaptive throttling**: `asyncio.Semaphore(3)` when rate limit low — reduces concurrent requests 5→3
+4. **Configurable cap**: `GHDISC_GITHUB_RATE_LIMIT_CAP_SECONDS` env var
+
+**Files changed**:
+- `discovery/github_client.py` — lower watermarks, cap wait, adaptive throttle
+- `config.py` — add `rate_limit_wait_cap_seconds` to `GitHubSettings`
+- `tests/unit/discovery/test_github_client.py` — 5 new `TestAdaptiveThrottling` tests
+
+**Verification**: 1675 tests passing, ruff clean, mypy --strict (145 files)
+
+**Wiki**: updated `apis/github-api-patterns.md` — replaced old 2026-04-25 rate limit section with new smart throttle section

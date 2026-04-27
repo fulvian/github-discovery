@@ -1,9 +1,9 @@
 ---
 Title: GitHub API Patterns and Constraints
 Topic: apis
-Sources: Foundation Blueprint §8, §18; Findings; Rate limit fix (2026-04-25)
+Sources: Foundation Blueprint §8, §18; Findings; Rate limit fix (2026-04-25); Smart throttle (2026-04-27)
 Raw: [blueprint.md](../../../foundation/github-discovery_foundation_blueprint.md); [findings.md](../../../../findings.md)
-Updated: 2026-04-25
+Updated: 2026-04-27
 Confidence: high
 ---
 
@@ -40,21 +40,34 @@ GitHub Discovery uses both REST and GraphQL APIs for repository metadata and dis
 - Unauthenticated: 60 requests/hour (insufficient for production)
 - Search API: 30 requests/minute authenticated
 
-### Rate Limit Handling (Bug Fix 2026-04-25)
+### Rate Limit Handling — Smart Throttling (2026-04-27 fix)
 
-**Problem**: The original `GitHubRestClient` raised `RateLimitError` immediately when `x-ratelimit-remaining` was below a watermark (50 for core, 5 for search). The caller (`gate1_metadata.py`) caught the exception and returned empty data → zero scores for all affected repos.
+**Problem**: Original `_await_if_rate_limited()` waited for full reset (3597s observed)
+instead of capping wait. Watermarks too aggressive (10/3).
 
-**Solution**: The client now retries with exponential backoff instead of failing fast:
+**Solution implemented** (Context7 + Brave verified GitHub best practices):
 
-| Mechanism | Implementation |
-|-----------|---------------|
-| **Proactive waiting** | `_await_if_rate_limited()`: when `remaining < watermark`, waits until `X-RateLimit-Reset` timestamp |
-| **Exponential backoff** | `_retry_on_rate_limit()`: 1s→2s→4s→8s→16s with random jitter (±50%) |
-| **Wait for reset** | Uses exact `X-RateLimit-Reset` header (UNIX timestamp) for precise timing |
-| **Retry budget** | 5 attempts max, 60s cap per wait |
-| **Watermarks** | Core: 10 (was 50), Search: 3 (was 5) — too conservative before |
+| Mechanism | Before | After |
+|-----------|--------|-------|
+| Core watermark | 10 | 5 |
+| Search watermark | 3 | 2 |
+| Max wait on low limit | Full reset (~60min) | 30s cap |
+| Concurrent limit when throttled | 5 (via httpx transport) | 3 via asyncio.Semaphore |
+| Configurable cap | No | Yes (`GHDISC_GITHUB_RATE_LIMIT_CAP_SECONDS`) |
 
-**Key insight**: `gate1_metadata.py` makes 7 parallel API calls per repo. With 30 repos, that's 210 calls. Authenticated rate limit is 5000/hour — enough, but only if we don't waste them by failing fast and retrying entire batches.
+**Key GitHub best practice**: "Don't wait full reset — use exponential backoff.
+Wait at most 30s before retrying" (GitHub REST API docs).
+
+**Adaptive throttling behavior**:
+1. First request: `remaining=None` → assume fine, no wait
+2. Response received: `_core_remaining` tracked via event hook
+3. Second request: if `remaining < watermark (5)` → wait capped 30s, activate Semaphore(3)
+4. Subsequent requests: throttle reduces concurrent requests from 5 → 3
+5. Recovery: when `remaining >= watermark`, throttle resets on next request
+
+**Configurable settings** (env vars):
+- `GHDISC_GITHUB_RATE_LIMIT_CAP_SECONDS` (default: 30.0) — max wait seconds
+- `GHDISC_GITHUB_MAX_CONCURRENT_REQUESTS` (default: 10) — pre-existing
 
 ## GraphQL API
 
