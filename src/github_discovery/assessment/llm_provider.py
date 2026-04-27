@@ -7,6 +7,7 @@ automatic retries. Used by the Gate 3 deep assessment pipeline.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from typing import TYPE_CHECKING
 
@@ -42,6 +43,7 @@ class LLMProvider:
         temperature: float = 0.1,
         max_retries: int = 3,
         fallback_model: str | None = None,
+        call_timeout: int = 120,
     ) -> None:
         """Initialize NanoGPT provider with instructor-patched client.
 
@@ -52,12 +54,14 @@ class LLMProvider:
             temperature: Sampling temperature (lower = more deterministic).
             max_retries: Maximum retries for instructor structured output.
             fallback_model: Optional fallback model identifier if primary fails.
+            call_timeout: Timeout in seconds for each LLM API call.
         """
         self._model = model
         self._temperature = temperature
         self._max_retries = max_retries
         self._base_url = base_url
         self._fallback_model = fallback_model
+        self._call_timeout = call_timeout
         self._token_usage: TokenUsage | None = None
 
         self._openai_client = AsyncOpenAI(
@@ -79,6 +83,7 @@ class LLMProvider:
             base_url=base_url,
             temperature=temperature,
             max_retries=max_retries,
+            call_timeout=call_timeout,
         )
 
     async def assess_dimension(
@@ -121,14 +126,23 @@ class LLMProvider:
         ]
 
         try:
-            result = await self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,  # type: ignore[arg-type]
-                response_model=LLMDimensionOutput,
-                max_retries=self._max_retries,
-                temperature=self._temperature,
-                max_tokens=_DEFAULT_MAX_TOKENS,
+            result = await asyncio.wait_for(
+                self._client.chat.completions.create(
+                    model=self._model,
+                    messages=messages,  # type: ignore[arg-type]
+                    response_model=LLMDimensionOutput,
+                    max_retries=self._max_retries,
+                    temperature=self._temperature,
+                    max_tokens=_DEFAULT_MAX_TOKENS,
+                ),
+                timeout=self._call_timeout,
             )
+        except TimeoutError:
+            raise AssessmentError(
+                f"LLM assessment timed out for dimension '{dimension.value}' "
+                f"after {self._call_timeout}s",
+                dimension=dimension.value,
+            ) from None
         except Exception as exc:
             original_error = AssessmentError(
                 f"LLM assessment failed for dimension '{dimension.value}': {exc}",
@@ -137,19 +151,28 @@ class LLMProvider:
             # Attempt fallback model if configured and different from primary
             if self._fallback_model and self._fallback_model != self._model:
                 try:
-                    result = await self._client.chat.completions.create(
-                        model=self._fallback_model,
-                        messages=messages,  # type: ignore[arg-type]
-                        response_model=LLMDimensionOutput,
-                        max_retries=self._max_retries,
-                        temperature=self._temperature,
-                        max_tokens=_DEFAULT_MAX_TOKENS,
+                    result = await asyncio.wait_for(
+                        self._client.chat.completions.create(
+                            model=self._fallback_model,
+                            messages=messages,  # type: ignore[arg-type]
+                            response_model=LLMDimensionOutput,
+                            max_retries=self._max_retries,
+                            temperature=self._temperature,
+                            max_tokens=_DEFAULT_MAX_TOKENS,
+                        ),
+                        timeout=self._call_timeout,
                     )
                     logger.info(
                         "dimension_assessed_with_fallback",
                         dimension=dimension.value,
                         fallback_model=self._fallback_model,
                     )
+                except TimeoutError:
+                    raise AssessmentError(
+                        f"LLM assessment timed out for dimension '{dimension.value}' "
+                        f"with fallback model after {self._call_timeout}s",
+                        dimension=dimension.value,
+                    ) from None
                 except Exception:
                     raise original_error from exc
             else:
@@ -205,14 +228,22 @@ class LLMProvider:
         ]
 
         try:
-            result = await self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,  # type: ignore[arg-type]
-                response_model=LLMBatchOutput,
-                max_retries=self._max_retries,
-                temperature=self._temperature,
-                max_tokens=_DEFAULT_MAX_TOKENS,
+            result = await asyncio.wait_for(
+                self._client.chat.completions.create(
+                    model=self._model,
+                    messages=messages,  # type: ignore[arg-type]
+                    response_model=LLMBatchOutput,
+                    max_retries=self._max_retries,
+                    temperature=self._temperature,
+                    max_tokens=_DEFAULT_MAX_TOKENS,
+                ),
+                timeout=self._call_timeout,
             )
+        except TimeoutError:
+            raise AssessmentError(
+                f"LLM batch assessment timed out for dimensions {dimension_names} "
+                f"after {self._call_timeout}s",
+            ) from None
         except Exception as exc:
             original_error = AssessmentError(
                 f"LLM batch assessment failed for dimensions {dimension_names}: {exc}",
@@ -220,19 +251,27 @@ class LLMProvider:
             # Attempt fallback model if configured and different from primary
             if self._fallback_model and self._fallback_model != self._model:
                 try:
-                    result = await self._client.chat.completions.create(
-                        model=self._fallback_model,
-                        messages=messages,  # type: ignore[arg-type]
-                        response_model=LLMBatchOutput,
-                        max_retries=self._max_retries,
-                        temperature=self._temperature,
-                        max_tokens=_DEFAULT_MAX_TOKENS,
+                    result = await asyncio.wait_for(
+                        self._client.chat.completions.create(
+                            model=self._fallback_model,
+                            messages=messages,  # type: ignore[arg-type]
+                            response_model=LLMBatchOutput,
+                            max_retries=self._max_retries,
+                            temperature=self._temperature,
+                            max_tokens=_DEFAULT_MAX_TOKENS,
+                        ),
+                        timeout=self._call_timeout,
                     )
                     logger.info(
                         "batch_assessed_with_fallback",
                         dimensions=dimension_names,
                         fallback_model=self._fallback_model,
                     )
+                except TimeoutError:
+                    raise AssessmentError(
+                        f"LLM batch assessment timed out with fallback model "
+                        f"for dimensions {dimension_names} after {self._call_timeout}s",
+                    ) from None
                 except Exception:
                     raise original_error from exc
             else:

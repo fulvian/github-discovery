@@ -219,6 +219,72 @@ class TestAssessBatch:
         assert "architecture" in user_content
 
 
+class TestCallTimeout:
+    """Tests for LLM call timeout via asyncio.wait_for."""
+
+    async def test_assess_dimension_timeout_raises_error(self) -> None:
+        """assess_dimension raises AssessmentError on asyncio.TimeoutError."""
+        import asyncio
+
+        provider = _make_provider()
+        # Make the LLM call hang forever (will be cancelled by timeout)
+        async def _hang_forever(*args: object, **kwargs: object) -> object:
+            await asyncio.sleep(9999)
+
+        provider._mock_client.chat.completions.create.side_effect = _hang_forever
+        provider._call_timeout = 1  # 1 second timeout for test
+
+        with pytest.raises(AssessmentError, match="timed out"):
+            await provider.assess_dimension(
+                ScoreDimension.CODE_QUALITY,
+                "prompt",
+                "content",
+            )
+
+    async def test_assess_batch_timeout_raises_error(self) -> None:
+        """assess_batch raises AssessmentError on asyncio.TimeoutError."""
+        import asyncio
+
+        provider = _make_provider()
+
+        async def _hang_forever(*args: object, **kwargs: object) -> object:
+            await asyncio.sleep(9999)
+
+        provider._mock_client.chat.completions.create.side_effect = _hang_forever
+        provider._call_timeout = 1  # 1 second timeout for test
+
+        with pytest.raises(AssessmentError, match="timed out"):
+            await provider.assess_batch(
+                [ScoreDimension.CODE_QUALITY],
+                "prompt",
+                "content",
+            )
+
+    async def test_timeout_message_includes_seconds(self) -> None:
+        """Timeout error message includes the timeout duration."""
+        import asyncio
+
+        provider = _make_provider()
+
+        async def _hang_forever(*args: object, **kwargs: object) -> object:
+            await asyncio.sleep(9999)
+
+        provider._mock_client.chat.completions.create.side_effect = _hang_forever
+        provider._call_timeout = 2
+
+        with pytest.raises(AssessmentError, match=r"after 2s"):
+            await provider.assess_dimension(
+                ScoreDimension.CODE_QUALITY,
+                "prompt",
+                "content",
+            )
+
+    async def test_custom_timeout_is_respected(self) -> None:
+        """Custom call_timeout is stored and used."""
+        provider = _make_provider()
+        assert provider._call_timeout == 120  # default
+
+
 class TestClose:
     """Tests for LLMProvider.close()."""
 

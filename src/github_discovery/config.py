@@ -117,6 +117,11 @@ class AssessmentSettings(BaseSettings):
         default=True,
         description="Use NanoGPT subscription endpoint",
     )
+    llm_call_timeout_seconds: int = Field(
+        default=120,
+        ge=10,
+        description="Timeout in seconds for each LLM API call (batch or per-dimension)",
+    )
 
     # Repomix packing settings
     repomix_max_tokens: int = Field(

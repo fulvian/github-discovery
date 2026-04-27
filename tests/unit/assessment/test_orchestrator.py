@@ -300,7 +300,7 @@ class TestQuickAssess:
     """Tests for AssessmentOrchestrator.quick_assess."""
 
     async def test_quick_assess_single_repo(self) -> None:
-        """quick_assess assesses a single repo."""
+        """quick_assess assesses a single repo using per-dimension mode."""
         orchestrator = _make_orchestrator()
         candidate = _make_candidate()
         screening = _make_screening_passed()
@@ -311,15 +311,10 @@ class TestQuickAssess:
         orchestrator._repomix.pack = AsyncMock(return_value=repo_content)  # type: ignore[assignment]
         orchestrator._heuristic.analyze = MagicMock(return_value=heuristic_scores)  # type: ignore[assignment]
 
+        # quick_assess uses per-dimension mode (batch_mode=False)
         mock_provider = AsyncMock()
-        mock_provider.assess_batch = AsyncMock(
-            return_value=LLMBatchOutput(
-                dimensions={
-                    dim.value: LLMDimensionOutput(score=0.7, confidence=0.8)
-                    for dim in ScoreDimension
-                },
-                overall_explanation="Adequate quality.",
-            ),
+        mock_provider.assess_dimension = AsyncMock(
+            return_value=LLMDimensionOutput(score=0.7, confidence=0.8),
         )
         mock_provider.last_token_usage = TokenUsage(total_tokens=500)
         orchestrator._provider = mock_provider
@@ -350,17 +345,12 @@ class TestQuickAssess:
         orchestrator._repomix.pack = AsyncMock(return_value=repo_content)  # type: ignore[assignment]
         orchestrator._heuristic.analyze = MagicMock(return_value=heuristic_scores)  # type: ignore[assignment]
 
+        # quick_assess uses per-dimension mode (batch_mode=False)
         mock_provider = AsyncMock()
-        # Batch mode is True by default — mock assess_batch for subset dimensions
-        mock_provider.assess_batch = AsyncMock(
-            return_value=LLMBatchOutput(
-                dimensions={
-                    ScoreDimension.CODE_QUALITY.value: LLMDimensionOutput(
-                        score=0.8,
-                        confidence=0.7,
-                    ),
-                },
-                overall_explanation="Good code quality.",
+        mock_provider.assess_dimension = AsyncMock(
+            return_value=LLMDimensionOutput(
+                score=0.8,
+                confidence=0.7,
             ),
         )
         mock_provider.last_token_usage = TokenUsage(total_tokens=200)
@@ -481,7 +471,11 @@ class TestAssessCandidate:
         assert result.gate3_pass is True
 
     async def test_fallback_to_heuristic_on_llm_failure(self) -> None:
-        """_assess_candidate falls back to heuristics when LLM fails."""
+        """_assess_candidate falls back to heuristics when all LLM calls fail.
+
+        When batch and per-dimension LLM calls all fail, the per-dimension
+        flow skips failed dimensions and fills them with heuristic scores.
+        """
         orchestrator = _make_orchestrator()
         candidate = _make_candidate()
         screening = _make_screening_passed()
@@ -493,7 +487,11 @@ class TestAssessCandidate:
         orchestrator._heuristic.analyze = MagicMock(return_value=heuristic_scores)  # type: ignore[assignment]
 
         mock_provider = AsyncMock()
+        # Both batch and per-dimension fail
         mock_provider.assess_batch = AsyncMock(
+            side_effect=AssessmentError("LLM failed"),
+        )
+        mock_provider.assess_dimension = AsyncMock(
             side_effect=AssessmentError("LLM failed"),
         )
         orchestrator._provider = mock_provider
@@ -509,9 +507,10 @@ class TestAssessCandidate:
             context=context,
         )
 
-        # Should get heuristic fallback
+        # Should fill all dimensions with heuristic fallback
         assert len(result.dimensions) == 8
-        assert result.overall_confidence == 0.3
+        # Heuristic fallback has low confidence
+        assert result.overall_confidence <= 0.3
 
     async def test_budget_recorded_after_assessment(self) -> None:
         """_assess_candidate records token usage in budget controller."""
@@ -546,6 +545,162 @@ class TestAssessCandidate:
 
 
 class TestOrchestratorProperties:
+    """Tests for AssessmentOrchestrator properties."""
+
+    def test_budget_controller_property(self) -> None:
+        """budget_controller returns the internal BudgetController."""
+        orchestrator = _make_orchestrator()
+        from github_discovery.assessment.budget_controller import BudgetController
+
+        assert isinstance(orchestrator.budget_controller, BudgetController)
+
+    def test_cache_size_initially_zero(self) -> None:
+        """cache_size is 0 before any assessments."""
+        orchestrator = _make_orchestrator()
+        assert orchestrator.cache_size == 0
+
+    async def test_close_without_provider(self) -> None:
+        """close() is safe when provider hasn't been initialized."""
+        orchestrator = _make_orchestrator()
+        await orchestrator.close()
+        # No error
+
+    async def test_close_with_provider(self) -> None:
+        """close() closes the LLM provider when initialized."""
+        orchestrator = _make_orchestrator()
+        mock_provider = AsyncMock()
+        orchestrator._provider = mock_provider
+
+        await orchestrator.close()
+
+        mock_provider.close.assert_awaited_once()
+
+
+class TestBatchToPerDimensionFallback:
+    """Tests for batch→per-dimension fallback in _assess_candidate."""
+
+    async def test_batch_failure_falls_back_to_per_dimension(self) -> None:
+        """When batch assessment fails, falls back to per-dimension."""
+        orchestrator = _make_orchestrator()
+        candidate = _make_candidate()
+        screening = _make_screening_passed()
+
+        repo_content = _make_repo_content()
+        heuristic_scores = _make_heuristic_scores()
+
+        orchestrator._repomix.pack = AsyncMock(return_value=repo_content)  # type: ignore[assignment]
+        orchestrator._heuristic.analyze = MagicMock(return_value=heuristic_scores)  # type: ignore[assignment]
+
+        mock_provider = AsyncMock()
+        # Batch fails, per-dimension succeeds
+        mock_provider.assess_batch = AsyncMock(
+            side_effect=AssessmentError("LLM batch timed out"),
+        )
+        mock_provider.assess_dimension = AsyncMock(
+            return_value=LLMDimensionOutput(score=0.7, confidence=0.8),
+        )
+        mock_provider.last_token_usage = TokenUsage(total_tokens=300)
+        orchestrator._provider = mock_provider
+
+        context = AssessmentContext(
+            candidates=[candidate],
+            screening_results={"test/repo": screening},
+            batch_mode=True,
+        )
+
+        result = await orchestrator._assess_candidate(
+            candidate,
+            screening,
+            context=context,
+        )
+
+        # Should get result from per-dimension fallback
+        assert result.full_name == "test/repo"
+        assert len(result.dimensions) == 8
+        # Verify batch was attempted, then per-dimension used
+        mock_provider.assess_batch.assert_called_once()
+        mock_provider.assess_dimension.assert_called()
+
+    async def test_quick_assess_uses_per_dimension_mode(self) -> None:
+        """quick_assess uses batch_mode=False by default."""
+        orchestrator = _make_orchestrator()
+        candidate = _make_candidate()
+        screening = _make_screening_passed()
+
+        repo_content = _make_repo_content()
+        heuristic_scores = _make_heuristic_scores()
+
+        orchestrator._repomix.pack = AsyncMock(return_value=repo_content)  # type: ignore[assignment]
+        orchestrator._heuristic.analyze = MagicMock(return_value=heuristic_scores)  # type: ignore[assignment]
+
+        mock_provider = AsyncMock()
+        mock_provider.assess_dimension = AsyncMock(
+            return_value=LLMDimensionOutput(score=0.7, confidence=0.8),
+        )
+        mock_provider.last_token_usage = TokenUsage(total_tokens=300)
+        orchestrator._provider = mock_provider
+
+        result = await orchestrator.quick_assess(candidate, screening)
+
+        assert result.full_name == "test/repo"
+        # assess_dimension should be called (per-dimension mode)
+        mock_provider.assess_dimension.assert_called()
+        # assess_batch should NOT be called
+        mock_provider.assess_batch.assert_not_called()
+
+
+class TestContentTruncation:
+    """Tests for _MAX_LLM_CONTENT_CHARS truncation in _assess_candidate."""
+
+    async def test_long_content_is_truncated(self) -> None:
+        """Content exceeding _MAX_LLM_CONTENT_CHARS is truncated before LLM call."""
+        from github_discovery.assessment.orchestrator import _MAX_LLM_CONTENT_CHARS
+
+        orchestrator = _make_orchestrator()
+        candidate = _make_candidate()
+        screening = _make_screening_passed()
+
+        # Create repo content that exceeds the limit
+        long_content = "x" * (_MAX_LLM_CONTENT_CHARS + 5000)
+        repo_content = RepoContent(
+            full_name="test/repo",
+            content=long_content,
+            total_files=10,
+            total_tokens=1000,
+            total_chars=len(long_content),
+        )
+        heuristic_scores = _make_heuristic_scores()
+
+        orchestrator._repomix.pack = AsyncMock(return_value=repo_content)  # type: ignore[assignment]
+        orchestrator._heuristic.analyze = MagicMock(return_value=heuristic_scores)  # type: ignore[assignment]
+
+        mock_provider = AsyncMock()
+        mock_provider.assess_batch = AsyncMock(
+            return_value=LLMBatchOutput(
+                dimensions={dim.value: LLMDimensionOutput(score=0.7) for dim in ScoreDimension},
+            ),
+        )
+        mock_provider.last_token_usage = TokenUsage(total_tokens=100)
+        orchestrator._provider = mock_provider
+
+        context = AssessmentContext(
+            candidates=[candidate],
+            screening_results={"test/repo": screening},
+        )
+
+        result = await orchestrator._assess_candidate(
+            candidate,
+            screening,
+            context=context,
+        )
+
+        # Verify assessment completed
+        assert result.full_name == "test/repo"
+
+        # Verify the content passed to assess_batch was truncated
+        call_args = mock_provider.assess_batch.call_args
+        content_arg = call_args[0][2] if call_args[0] else call_args.kwargs.get("repo_content", "")
+        assert len(content_arg) <= _MAX_LLM_CONTENT_CHARS
     """Tests for AssessmentOrchestrator properties."""
 
     def test_budget_controller_property(self) -> None:

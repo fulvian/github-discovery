@@ -43,9 +43,9 @@ logger = structlog.get_logger(__name__)
 _MAX_CONCURRENT = 3  # Conservative concurrency for LLM calls
 
 # Maximum content length sent to the LLM for batch assessment.
-# ~10K chars ≈ 2.5K tokens — quality signals are in structure, not volume.
-# GLM-5.1 processes this size in ~30s; larger contexts cause timeouts.
-_MAX_LLM_CONTENT_CHARS = 10_000
+# ~4K chars ≈ 1K tokens — quality signals are in structure, not volume.
+# GLM-5.1 processes this size reliably within timeout limits.
+_MAX_LLM_CONTENT_CHARS = 4_000
 
 
 class AssessmentOrchestrator:
@@ -95,6 +95,7 @@ class AssessmentOrchestrator:
                 temperature=self._assessment_settings.llm_temperature,
                 max_retries=self._assessment_settings.llm_max_retries,
                 fallback_model=self._assessment_settings.llm_fallback_model,
+                call_timeout=self._assessment_settings.llm_call_timeout_seconds,
             )
         return self._provider
 
@@ -159,6 +160,7 @@ class AssessmentOrchestrator:
             screening_results={candidate.full_name: screening} if screening else {},
             dimensions=dimensions or list(ScoreDimension),
             gate3_threshold=self._assessment_settings.gate3_threshold,
+            batch_mode=False,  # Quick assess: per-dimension is more reliable
         )
         result = await self._assess_candidate(
             candidate,
@@ -235,16 +237,32 @@ class AssessmentOrchestrator:
                 llm_content = llm_content[:_MAX_LLM_CONTENT_CHARS]
 
             # Step 6: LLM assessment
+            # Batch mode: try single-call, fallback to per-dimension on failure.
+            # Per-dimension mode: always call individually.
             provider = await self._ensure_provider()
 
             if context.batch_mode:
-                result = await self._assess_batch(
-                    provider,
-                    candidate,
-                    llm_content,
-                    heuristic_scores,
-                    context,
-                )
+                try:
+                    result = await self._assess_batch(
+                        provider,
+                        candidate,
+                        llm_content,
+                        heuristic_scores,
+                        context,
+                    )
+                except AssessmentError as exc:
+                    # Batch failed (timeout, validation, API error) → per-dimension
+                    log.warning(
+                        "batch_assessment_failed_falling_back_to_per_dimension",
+                        error=str(exc),
+                    )
+                    result = await self._assess_per_dimension(
+                        provider,
+                        candidate,
+                        llm_content,
+                        heuristic_scores,
+                        context,
+                    )
             else:
                 result = await self._assess_per_dimension(
                     provider,
@@ -295,28 +313,19 @@ class AssessmentOrchestrator:
         heuristic_scores: HeuristicScores,
         context: AssessmentContext,
     ) -> DeepAssessmentResult:
-        """Assess all dimensions in a single batch LLM call."""
+        """Assess all dimensions in a single batch LLM call.
+
+        Raises AssessmentError if batch call fails — callers handle fallback.
+        """
         # Build combined system prompt
         prompts = [get_prompt(d) for d in context.dimensions]
         combined_prompt = "\n\n---\n\n".join(prompts)
 
-        try:
-            batch_output = await provider.assess_batch(
-                context.dimensions,
-                combined_prompt,
-                repo_content,
-            )
-        except AssessmentError:
-            logger.warning(
-                "batch_assessment_failed_using_heuristic_fallback",
-                full_name=candidate.full_name,
-            )
-            return self._parser.create_heuristic_fallback(
-                heuristic_scores,
-                candidate.full_name,
-                candidate.commit_sha,
-                gate3_threshold=context.gate3_threshold,
-            )
+        batch_output = await provider.assess_batch(
+            context.dimensions,
+            combined_prompt,
+            repo_content,
+        )
 
         return self._parser.parse_batch(
             batch_output,
