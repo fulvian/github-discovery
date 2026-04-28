@@ -52,6 +52,13 @@ class DiscoveryQuery(BaseModel):
         default=None,
         description="Seed repository URLs for expansion channels",
     )
+    auto_seed: bool = Field(
+        default=False,
+        description=(
+            "When True and seed_urls is empty, "
+            "auto-discover seed repos from query (Wave H6)"
+        ),
+    )
 
 
 class ChannelResult(BaseModel):
@@ -81,6 +88,10 @@ class ChannelResult(BaseModel):
         default=0.0,
         ge=0.0,
         description="Time spent on this channel in seconds",
+    )
+    errors: list[str] = Field(
+        default_factory=list,
+        description="Errors encountered during channel execution (Wave H7)",
     )
 
 
@@ -116,4 +127,8 @@ class DiscoveryResult(BaseModel):
     session_id: str | None = Field(
         default=None,
         description="Agentic session ID if provided in query",
+    )
+    errors_per_channel: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Errors encountered per channel (Wave H7)",
     )

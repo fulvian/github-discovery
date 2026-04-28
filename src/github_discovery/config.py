@@ -69,6 +69,16 @@ class DiscoverySettings(BaseSettings):
             "Default 1 is conservative; raise to 3 for broader coverage."
         ),
     )
+    activity_days: int | None = Field(
+        default=None,
+        description=(
+            "Override inactivity threshold for all domains (days). "
+            "If set, replaces per-domain defaults. "
+            "Default None = use per-domain thresholds (180 general, "
+            "365 for LANG_TOOL, 90 for SECURITY_TOOL). "
+            "Wave H1 adaptive activity filter."
+        ),
+    )
 
 
 class ScreeningSettings(BaseSettings):
@@ -287,6 +297,16 @@ class MCPSettings(BaseSettings):
     streamable_http_path: str = Field(
         default="/mcp",
         description="Path for streamable HTTP transport endpoint",
+    )
+
+    # --- GA hardening fields (Wave J) ---
+    api_keys: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Comma-separated API keys for Bearer token authentication. "
+            "When set, HTTP requests (except /health) must include "
+            "Authorization: Bearer <key> header. Default empty = no auth."
+        ),
     )
 
 

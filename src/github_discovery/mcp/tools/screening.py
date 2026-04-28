@@ -50,6 +50,7 @@ def register_screening_tools(mcp: FastMCP, settings: Settings) -> None:
             gate_level: str = "both",
             min_gate1_score: float | None = None,
             min_gate2_score: float | None = None,
+            max_candidates: int = 0,
             session_id: str | None = None,
             ctx: Context[ServerSession, AppContext] | None = None,
         ) -> dict[str, object]:
@@ -58,11 +59,19 @@ def register_screening_tools(mcp: FastMCP, settings: Settings) -> None:
             Progressive deepening: run Gate 1, Gate 2, or both. Agent decides
             thresholds and depth.
 
+            IMPORTANT: For large pools (>20 candidates), set max_candidates to
+            process in batches. The MCP transport has a request timeout, so
+            screening 50 repos in a single call will timeout. Use multiple
+            calls with max_candidates=10 each, combined with session_id for
+            progressive deepening.
+
             Args:
                 pool_id: Candidate pool ID to screen
                 gate_level: Screening level — "1", "2", or "both" (default: "both")
                 min_gate1_score: Override Gate 1 threshold (default: from config)
                 min_gate2_score: Override Gate 2 threshold (default: from config)
+                max_candidates: Max repos per call (0=all, default: 0).
+                    Set to 10-15 for large pools to avoid MCP timeouts.
                 session_id: Optional session ID for workflow continuity
                 ctx: MCP request context (injected by FastMCP)
             """
@@ -84,6 +93,18 @@ def register_screening_tools(mcp: FastMCP, settings: Settings) -> None:
                 return format_tool_result(
                     success=False,
                     error_message=(f"Pool {pool_id} is empty. No candidates to screen."),
+                )
+
+            # Batch processing: if max_candidates > 0, take only that many
+            # to avoid MCP transport timeouts on large pools.
+            total_in_pool = len(candidates)
+            if max_candidates > 0 and len(candidates) > max_candidates:
+                candidates = candidates[:max_candidates]
+                logger.info(
+                    "screening_batched",
+                    pool_id=pool_id,
+                    total_in_pool=total_in_pool,
+                    batch_size=len(candidates),
                 )
 
             # Resolve gate level

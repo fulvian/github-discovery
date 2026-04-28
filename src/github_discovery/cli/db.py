@@ -1,4 +1,4 @@
-"""CLI commands for database maintenance — T3.5."""
+"""CLI commands for database maintenance — T3.5 + Wave J8."""
 
 from __future__ import annotations
 
@@ -53,3 +53,46 @@ def register(app: typer.Typer) -> None:
             typer.echo(f"Would prune {count} expired entries.")
         else:
             typer.echo(f"Pruned {count} expired entries.")
+
+    # Wave J8: Session pruning command
+    @db_app.command()
+    def sessions(
+        older_than: Annotated[
+            int,
+            typer.Option("--older-than", help="Delete sessions older than N days"),
+        ] = 30,
+        idle_days: Annotated[
+            int,
+            typer.Option("--idle-days", help="Delete sessions idle for N days"),
+        ] = 7,
+        dry_run: Annotated[
+            bool,
+            typer.Option("--dry-run", help="Count sessions without deleting"),
+        ] = False,
+    ) -> None:
+        """Prune stale discovery sessions.
+
+        Removes sessions that are older than ``--older-than`` days or
+        have not been updated in ``--idle-days`` days.
+        """
+        import asyncio
+
+        from github_discovery.mcp.session import SessionManager
+
+        async def _prune_sessions() -> int:
+            manager = SessionManager()
+            await manager.initialize()
+            try:
+                return await manager.prune(
+                    older_than_days=older_than,
+                    idle_days=idle_days,
+                )
+            finally:
+                await manager.close()
+
+        count = asyncio.run(_prune_sessions())
+
+        if dry_run:
+            typer.echo(f"Would prune {count} stale sessions.")
+        else:
+            typer.echo(f"Pruned {count} stale sessions.")

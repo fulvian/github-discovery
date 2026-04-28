@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from github_discovery.discovery.domain_classifier import classify_candidate
 from github_discovery.discovery.types import ChannelResult
 from github_discovery.models.candidate import RepoCandidate
 from github_discovery.models.enums import DiscoveryChannel
@@ -217,26 +218,68 @@ class SeedExpansion:
             elapsed_seconds=elapsed,
         )
 
+    async def auto_discover_seeds(
+        self,
+        query_text: str,
+        max_seeds: int = 3,
+    ) -> list[str]:
+        """Auto-discover seed repo URLs from a search query.
+
+        Runs a quick GitHub search and returns the top N repo URLs.
+        Used when seed_urls is empty and auto_seed is enabled.
+
+        Args:
+            query_text: Search query to find seed repositories.
+            max_seeds: Maximum number of seed URLs to return.
+
+        Returns:
+            List of GitHub repository HTML URLs.
+        """
+        try:
+            items, _ = await self._rest_client.search(
+                "/search/repositories",
+                query_text,
+                sort="stars",
+                order="desc",
+                max_pages=1,
+                per_page=max_seeds,
+            )
+            return [
+                item.get("html_url", "")
+                for item in items[:max_seeds]
+                if item.get("html_url")
+            ]
+        except Exception:
+            logger.warning("auto_seed_search_failed", query=query_text)
+            return []
+
     async def expand(
         self,
         seed_urls: list[str],
         strategies: list[str] | None = None,
         max_depth: int = 1,
+        auto_seed_query: str | None = None,
     ) -> ChannelResult:
         """Run expansion strategies on seed repos.
 
         Runs selected strategies concurrently, merges results with
         deduplication by ``full_name``, and excludes seed repos.
 
+        When ``seed_urls`` is empty and ``auto_seed_query`` is provided,
+        auto-discovers seeds via GitHub search first.
+
         Args:
             seed_urls: List of GitHub repository URLs to use as seeds.
             strategies: Expansion strategies to run. Default: ``["org", "contributors"]``.
             max_depth: Traversal depth (MVP only supports depth 1).
+            auto_seed_query: When set and seed_urls is empty, auto-discover seeds.
 
         Returns:
             ChannelResult with aggregated, deduplicated candidates.
         """
         start_time = time.monotonic()
+
+        seed_urls = await self._resolve_seeds(seed_urls, auto_seed_query)
 
         if not seed_urls:
             return self._empty_result()
@@ -306,6 +349,41 @@ class SeedExpansion:
         )
 
     # --- Private helpers ---
+
+    async def _resolve_seeds(
+        self,
+        seed_urls: list[str],
+        auto_seed_query: str | None,
+    ) -> list[str]:
+        """Resolve seed URLs, auto-discovering if needed.
+
+        When seed_urls is empty and auto_seed_query is provided,
+        runs a GitHub search to discover seed repos automatically.
+
+        Args:
+            seed_urls: Explicit seed URLs (may be empty).
+            auto_seed_query: Query text for auto-discovery, or None.
+
+        Returns:
+            Resolved list of seed URLs (may be empty).
+        """
+        if seed_urls or not auto_seed_query:
+            return seed_urls
+
+        discovered = await self.auto_discover_seeds(auto_seed_query)
+        if discovered:
+            logger.info(
+                "seed_expansion_auto_seed_discovered",
+                query=auto_seed_query,
+                seeds=discovered,
+            )
+        else:
+            logger.info(
+                "seed_expansion_auto_seed_empty",
+                query=auto_seed_query,
+                note="No seeds found, returning empty result",
+            )
+        return discovered
 
     @staticmethod
     def _parse_owner_repo(url: str) -> tuple[str, str] | None:
@@ -402,7 +480,7 @@ class SeedExpansion:
             else full_name.split("/")[0]
         )
 
-        return RepoCandidate(
+        candidate = RepoCandidate(
             full_name=full_name,
             url=html_url,
             html_url=html_url,
@@ -425,6 +503,9 @@ class SeedExpansion:
             source_channel=DiscoveryChannel.SEED_EXPANSION,
             discovery_score=discovery_score,
         )
+        # TA3: Classify domain for scoring profile selection
+        candidate.domain = classify_candidate(candidate)
+        return candidate
 
     async def _fetch_org_or_user_repos(
         self,

@@ -57,6 +57,13 @@ class TokenUsage(BaseModel):
     total_tokens: int = Field(default=0, ge=0, description="Total tokens consumed")
     model_used: str = Field(default="", description="LLM model identifier")
     provider: str = Field(default="", description="LLM provider name")
+    token_usage_source: str = Field(
+        default="unknown",
+        description=(
+            "Source of token usage data: 'api' if the provider returned "
+            "usage stats, 'estimated' if computed from content length."
+        ),
+    )
 
 
 class DeepAssessmentResult(BaseModel):
@@ -122,6 +129,13 @@ class DeepAssessmentResult(BaseModel):
     cached: bool = Field(
         default=False,
         description="Whether this result was loaded from cache (dedup by SHA)",
+    )
+    degraded: bool = Field(
+        default=False,
+        description=(
+            "Whether assessment used heuristic fallbacks for any dimension "
+            "(indicates degraded quality due to LLM failures or content truncation)"
+        ),
     )
 
     @property

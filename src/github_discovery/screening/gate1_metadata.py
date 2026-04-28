@@ -229,7 +229,7 @@ class Gate1MetadataScreener:
         )
 
         # 5. Compute total and apply threshold
-        result.gate1_total = result.compute_total()
+        result.gate1_total, result.gate1_coverage = result.compute_total()
         result.gate1_pass = result.gate1_total >= threshold_val
 
         return result

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from github_discovery.assessment.budget_controller import BudgetController
+from github_discovery.assessment.content_strategy import ContentStrategy
 from github_discovery.assessment.heuristics import HeuristicAnalyzer
 from github_discovery.assessment.llm_provider import LLMProvider
 from github_discovery.assessment.prompts import get_prompt
@@ -37,15 +38,11 @@ if TYPE_CHECKING:
     from github_discovery.config import Settings
     from github_discovery.models.candidate import RepoCandidate
     from github_discovery.models.screening import ScreeningResult
+    from github_discovery.scoring.feature_store import FeatureStore
 
 logger = structlog.get_logger(__name__)
 
 _MAX_CONCURRENT = 3  # Conservative concurrency for LLM calls
-
-# Maximum content length sent to the LLM for batch assessment.
-# ~4K chars ≈ 1K tokens — quality signals are in structure, not volume.
-# GLM-5.1 processes this size reliably within timeout limits.
-_MAX_LLM_CONTENT_CHARS = 4_000
 
 
 class AssessmentOrchestrator:
@@ -62,14 +59,20 @@ class AssessmentOrchestrator:
     8. Budget recording: track token usage
     """
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        feature_store: FeatureStore | None = None,
+    ) -> None:
         """Initialize with application settings.
 
         Args:
             settings: Application settings with assessment configuration.
+            feature_store: Optional persistent feature store for cross-session caching.
         """
         self._settings = settings
         self._assessment_settings = settings.assessment
+        self._feature_store = feature_store
 
         self._repomix = RepomixAdapter(
             max_tokens=self._assessment_settings.repomix_max_tokens,
@@ -77,9 +80,11 @@ class AssessmentOrchestrator:
         )
         self._heuristic = HeuristicAnalyzer()
         self._parser = ResultParser()
+        self._content_strategy = ContentStrategy()
         self._budget = BudgetController(
             max_tokens_per_repo=self._assessment_settings.max_tokens_per_repo,
             daily_soft_limit=self._assessment_settings.daily_soft_limit,
+            hard_daily_limit=self._assessment_settings.hard_daily_limit,
         )
         self._provider: LLMProvider | None = None
         self._cache: dict[str, tuple[DeepAssessmentResult, float]] = {}
@@ -170,7 +175,7 @@ class AssessmentOrchestrator:
         )
         return result
 
-    async def _assess_candidate(
+    async def _assess_candidate(  # noqa: PLR0912, PLR0915
         self,
         candidate: RepoCandidate,
         screening: ScreeningResult | None,
@@ -193,7 +198,7 @@ class AssessmentOrchestrator:
         # Step 1: Hard gate check
         self._check_hard_gate(full_name, screening, required_gates=required_gates)
 
-        # Step 2: Cache check
+        # Step 2: Cache check (in-memory first, then persistent FeatureStore)
         cache_key = f"{full_name}:{candidate.commit_sha}"
         if cache_key in self._cache:
             cached_result, cached_at = self._cache[cache_key]
@@ -206,35 +211,57 @@ class AssessmentOrchestrator:
             del self._cache[cache_key]
             log.debug("assessment_cache_expired", cache_key=cache_key)
 
+        # Check persistent FeatureStore if available
+        if self._feature_store is not None:
+            try:
+                persisted = await self._feature_store.get_assessment(
+                    full_name,
+                    candidate.commit_sha,
+                )
+                if persisted is not None:
+                    log.info("assessment_persistent_cache_hit")
+                    # Load into in-memory cache for faster subsequent access
+                    self._cache[cache_key] = (persisted, time.monotonic())
+                    data = persisted.model_dump()
+                    data["cached"] = True
+                    return DeepAssessmentResult(**data)
+            except Exception as exc:
+                log.warning("assessment_persistent_cache_error", error=str(exc))
+
         # Step 3: Soft daily limit check (monitoring only, never blocks)
         self._budget.check_daily_soft_limit(full_name)
 
         try:
-            # Step 3b: Pre-pack budget check using repomix_max_tokens estimate
+            # Step 3b: Pre-pack budget check using content strategy
+            strategy = self._content_strategy.select(candidate)
             self._budget.check_repo_budget(
                 full_name,
-                self._assessment_settings.repomix_max_tokens,
+                strategy.max_tokens_approx,
             )
 
-            # Step 4: Repomix pack
+            # Step 4: Repomix pack (adaptive max_tokens from content strategy)
             repo_content = await self._repomix.pack(
                 candidate.html_url,
                 full_name,
+                max_tokens_override=strategy.max_tokens_approx,
             )
             self._budget.check_repo_budget(full_name, repo_content.total_tokens)
 
             # Step 5: Heuristic scoring
             heuristic_scores = self._heuristic.analyze(repo_content)
 
-            # Step 5b: Truncate content for LLM if needed
+            # Step 5b: Adaptive content truncation using content strategy tier
+            # (TC1: replaces hardcoded _MAX_LLM_CONTENT_CHARS = 4_000)
             llm_content = repo_content.content
-            if len(llm_content) > _MAX_LLM_CONTENT_CHARS:
+            max_chars = strategy.max_chars
+            if len(llm_content) > max_chars:
                 log.debug(
                     "llm_content_truncated",
                     original_chars=len(llm_content),
-                    max_chars=_MAX_LLM_CONTENT_CHARS,
+                    max_chars=max_chars,
+                    tier=strategy.tier.value,
                 )
-                llm_content = llm_content[:_MAX_LLM_CONTENT_CHARS]
+                llm_content = llm_content[:max_chars]
 
             # Step 6: LLM assessment
             # Batch mode: try single-call, fallback to per-dimension on failure.
@@ -286,6 +313,13 @@ class AssessmentOrchestrator:
             # Cache the result with current timestamp
             self._cache[cache_key] = (result, time.monotonic())
 
+            # Persist to FeatureStore if available (cross-session caching)
+            if self._feature_store is not None:
+                try:
+                    await self._feature_store.put_assessment(result)
+                except Exception as exc:
+                    log.warning("assessment_persistent_store_error", error=str(exc))
+
             log.info(
                 "assessment_complete",
                 overall_quality=result.overall_quality,
@@ -298,8 +332,13 @@ class AssessmentOrchestrator:
 
         except AssessmentError:
             raise
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except MemoryError:
+            log.critical("assessment_memory_error", full_name=full_name)
+            raise
         except Exception as exc:
-            log.error("assessment_failed", error=str(exc))
+            log.error("assessment_failed", error=str(exc), error_type=type(exc).__name__)
             raise AssessmentError(
                 f"Gate 3 assessment failed for {full_name}: {exc}",
                 repo_url=candidate.html_url,

@@ -227,6 +227,7 @@ class TestCallTimeout:
         import asyncio
 
         provider = _make_provider()
+
         # Make the LLM call hang forever (will be cancelled by timeout)
         async def _hang_forever(*args: object, **kwargs: object) -> object:
             await asyncio.sleep(9999)

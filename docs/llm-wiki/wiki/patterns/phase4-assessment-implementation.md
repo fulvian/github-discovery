@@ -237,3 +237,62 @@ Post-fix E2E re-testing revealed 3 additional bugs. All fixed.
 
 - 1604 tests passing (was 1601), 0 lint/type errors
 - 3 new tests: `test_quick_assess_gate1_blocked`, `test_search_matches_language_from_query_text`, `test_search_matches_topic_from_query_text`
+
+## Production Readiness Plan v1 (2026-04-27)
+
+Comprehensive hardening of the 4-gate pipeline to production readiness. 6 waves (A–F), ~22 person-days of tasks.
+
+### Wave B — Confidence & Coverage Transparency (TB1–TB4)
+
+**TB1 — Confidence-aware scoring**: `compute_total()` returns `tuple[float, float]` (weighted quality, coverage). Sub-scores with confidence ≤ 0.0 are excluded. Added `gate1_coverage` and `gate2_coverage` fields to `ScreeningResult`.
+
+**TB2 — Explicit fallback values**: Added `FALLBACK_VALUE=0.5`, `FALLBACK_CONFIDENCE=0.0` constants in `screening/constants.py`.
+
+**TB3 — Doctor CLI pre-flight checks**: New `ghdisc doctor` command checks git, gitleaks, scc, repomix, GitHub API, NanoGPT API, domain profiles, and feature store. Rich table output, exit code 0/1.
+
+**TB4 — Deduplication warnings**: `SubprocessRunner` tracks unavailable tools and warns only once per tool.
+
+### Wave C — Content Truncation Handling (TC1–TC6)
+
+**TC1 — Adaptive content strategy**: New `assessment/content_strategy.py` with `SizeTier` enum (tiny/small/medium/large/huge), `classify_size_tier()`, `estimate_token_count()`. Tier-based char limits: tiny=240K, small=200K, medium=160K, large=120K, huge=80K. `ContentStrategy.select()` provides adaptive `max_tokens_override` for `RepomixAdapter.pack()`.
+
+**TC2 — Sampling for huge repos**: Added `needs_sampling()` and `compute_sample_size()` in `content_strategy.py`. Uses 5% sample fraction (10–100 files) for repos > 1000 files.
+
+**TC3 — HeuristicFallback confidence cap**: `HeuristicFallback.confidence_cap()` capped at 0.2. `DeepAssessmentResult.degraded=True` when any dimension uses heuristic fallback.
+
+**TC4 — Weighted average confidence**: `_compute_overall_confidence()` uses weighted average by dimension profile weights, not simple minimum. Missing critical dimension penalty: -0.10 if any dimension with profile weight ≥ 0.15 has confidence 0.0.
+
+**TC5 — Tenacity retry for LLM calls**: `llm_provider.py` uses tenacity retry with `stop_after_attempt(3)` and exponential backoff (1s, 2s, 4s).
+
+**TC6 — TokenUsage source tracking**: `TokenUsage.token_usage_source: str` tracks whether token counts come from API response (`"api"`) or are estimated from content length (`"estimated"`).
+
+### Wave D — Signal Detection Hardening (TD1–TD3)
+
+**TD1 — Path-based CI detection**: Primary `_detect_ci()` uses path-based detection with `_CI_PATH_PATTERNS` (`.github/workflows/`, `.gitlab-ci.yml`, `Jenkinsfile`, etc.). Legacy pattern-based fallback only if path detection returns no results.
+
+**TD2 — Path-based docs/security detection**: `_detect_docs()` uses `_DOC_PATH_PATTERNS` (`README`, `docs/`, `CHANGELOG`, etc.). `_detect_security()` uses `_SECURITY_PATH_PATTERNS` (`SECURITY.md`, `.snyk`, `dependabot.yml`, etc.). Added "scorecard" and "openssf" to `_SECURITY_PATTERNS`.
+
+**TD3 — Repomix signal include patterns**: Added `_SIGNAL_INCLUDE_PATTERNS` in `repomix_adapter.py` for targeted file inclusion. `_build_config()` is now module-level function accepting `include_patterns` kwarg.
+
+### Wave E — Error Handling & Fallback (TE1–TE3)
+
+**TE1 — OSError handling in clone**: `gate2_static._clone_repo()` now catches `OSError` separately from generic `Exception`, with differentiated logging (warning for OSError, error for unexpected). Added `degraded: bool` field to `DeepAssessmentResult`.
+
+**TE2 — Persistent DeepAssessmentResult cache**: New `assessment_results` table in `FeatureStore`. Added `put_assessment()`, `get_assessment()`, `get_assessment_batch()`, `delete_assessment()` methods. `AssessmentOrchestrator` now accepts optional `feature_store` parameter and persists `DeepAssessmentResult` for cross-session caching.
+
+**TE3 — Hard daily limit**: Added `hard_daily_limit: int` to `AssessmentSettings` (env: `GHDISC_ASSESSMENT_HARD_DAILY_LIMIT`, default=0=disabled). `BudgetController.check_daily_soft_limit()` now enforces hard limit first and raises `BudgetExceededError(budget_type="daily_hard")` when exceeded.
+
+### Wave F — Reporting & Visibility (TF1–TF3)
+
+**TF1 — Enhanced rank CLI columns**: `ScoreResult` now includes `degraded: bool | None` field. `cli/rank.py` output includes `coverage`, `degraded`, `gate3` columns alongside `quality_score`, `value_score`, `confidence`.
+
+**TF2 — Session report script**: New `scripts/generate_session_report.py` generates markdown reports from session IDs. Reports session status, pipeline progress (discovered/screened/assessed counts), pool IDs, configuration overrides.
+
+**TF3 — Wiki updates**: This page.
+
+### Verification (2026-04-27)
+
+- 1476 unit tests passing
+- ruff: 0 errors (fixed pre-existing TC001, PLR2004, D107, D105, T201, PLC0415, PLW0603 issues)
+- mypy --strict: 0 errors in 145 source files
+- 9 files modified, 3 new files (`content_strategy.py`, `doctor.py`, `generate_session_report.py`)

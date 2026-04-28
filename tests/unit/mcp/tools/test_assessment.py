@@ -24,7 +24,7 @@ def _make_candidate(full_name: str = "owner/repo-1") -> RepoCandidate:
         url=f"https://github.com/{full_name}",
         html_url=f"https://github.com/{full_name}",
         api_url=f"https://api.github.com/repos/{full_name}",
-        owner_login=full_name.split("/")[0],
+        owner_login=full_name.split("/", maxsplit=1)[0],
         source_channel=DiscoveryChannel.SEARCH,
         created_at=now,
         updated_at=now,
@@ -71,12 +71,15 @@ class TestDeepAssessTool:
             ),
         }
 
-        with patch(
-            "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
-            return_value=screening_results,
-        ), patch(
-            "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
-            return_value=[_make_candidate("owner/repo-1")],
+        with (
+            patch(
+                "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
+                return_value=screening_results,
+            ),
+            patch(
+                "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
+                return_value=[_make_candidate("owner/repo-1")],
+            ),
         ):
             from github_discovery.mcp.server import create_server
 
@@ -123,12 +126,15 @@ class TestDeepAssessTool:
             ),
         }
 
-        with patch(
-            "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
-            return_value=screening_results,
-        ), patch(
-            "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
-            return_value=[_make_candidate("owner/repo-1")],
+        with (
+            patch(
+                "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
+                return_value=screening_results,
+            ),
+            patch(
+                "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
+                return_value=[_make_candidate("owner/repo-1")],
+            ),
         ):
             from github_discovery.mcp.server import create_server
 
@@ -201,12 +207,15 @@ class TestQuickAssessTool:
             ),
         }
 
-        with patch(
-            "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
-            return_value=screening_results,
-        ), patch(
-            "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
-            return_value=[_make_candidate("owner/repo-1")],
+        with (
+            patch(
+                "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
+                return_value=screening_results,
+            ),
+            patch(
+                "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
+                return_value=[_make_candidate("owner/repo-1")],
+            ),
         ):
             from github_discovery.mcp.server import create_server
 
@@ -247,12 +256,15 @@ class TestQuickAssessTool:
             ),
         }
 
-        with patch(
-            "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
-            return_value=screening_results,
-        ), patch(
-            "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
-            return_value=[_make_candidate("owner/repo-1")],
+        with (
+            patch(
+                "github_discovery.mcp.tools.assessment._screen_for_hard_gate",
+                return_value=screening_results,
+            ),
+            patch(
+                "github_discovery.mcp.tools.assessment._build_candidates_with_metadata",
+                return_value=[_make_candidate("owner/repo-1")],
+            ),
         ):
             from github_discovery.mcp.server import create_server
 

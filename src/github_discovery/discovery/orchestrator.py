@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import structlog
@@ -42,6 +43,10 @@ _CHANNEL_QUALITY_BONUSES: dict[DiscoveryChannel, float] = {
     DiscoveryChannel.DEPENDENCY: 0.1,  # Provenance from trusted seeds
 }
 _MAX_DISCOVERY_SCORE = 1.0  # Hard cap on discovery scores
+
+# H2: Recency boost — repos pushed within this window get score boost.
+_RECENCY_BOOST_WINDOW_DAYS = 30
+_RECENCY_BOOST_AMOUNT = 0.05
 
 # Alias mapping: common settings strings that differ from enum values.
 _CHANNEL_ALIASES: dict[str, DiscoveryChannel] = {
@@ -78,8 +83,8 @@ class DiscoveryOrchestrator:
         self._graphql_client = GitHubGraphQLClient(settings.github)
 
         # Instantiate all channels
-        self._search_channel = SearchChannel(self._rest_client)
-        self._code_search_channel = CodeSearchChannel(self._rest_client)
+        self._search_channel = SearchChannel(self._rest_client, settings=settings)
+        self._code_search_channel = CodeSearchChannel(self._rest_client, settings=self._settings)
         self._curated_channel = CuratedChannel(self._rest_client)
         self._registry_channel = RegistryChannel()
         self._dependency_channel = DependencyChannel(self._rest_client, self._graphql_client)
@@ -109,7 +114,7 @@ class DiscoveryOrchestrator:
         # 3. Build candidates_by_channel counts (pre-dedup)
         candidates_by_channel = self._build_channel_counts(channel_results)
 
-        # 4. Deduplicate and score
+        # 4. Deduplicate, apply bonuses (breadth, quality, recency)
         candidates, duplicate_count = self._deduplicate_and_score(channel_results)
 
         # 5. Sort by discovery_score descending
@@ -121,6 +126,12 @@ class DiscoveryOrchestrator:
         # 7. Persist pool
         pool = await self._pool_manager.create_pool(query, candidates)
 
+        # H7: Collect errors per channel for visibility
+        errors_per_channel: dict[str, list[str]] = {}
+        for result in channel_results:
+            if result.errors:
+                errors_per_channel[result.channel.value] = result.errors
+
         elapsed = time.monotonic() - start_time
         logger.info(
             "orchestrator_discover_complete",
@@ -129,7 +140,20 @@ class DiscoveryOrchestrator:
             total_candidates=len(candidates),
             duplicate_count=duplicate_count,
             elapsed_seconds=round(elapsed, 3),
+            channel_errors=bool(errors_per_channel),
         )
+
+        # H7: Log per-channel completion for observability
+        for result in channel_results:
+            logger.info(
+                "discovery_channel_completed",
+                channel=result.channel.value,
+                query=query.query,
+                candidates_found=len(result.candidates),
+                rate_limit_remaining=result.rate_limit_remaining,
+                elapsed_seconds=round(result.elapsed_seconds, 3),
+                errors=result.errors,
+            )
 
         return DiscoveryResult(
             pool_id=pool.pool_id,
@@ -139,6 +163,7 @@ class DiscoveryOrchestrator:
             duplicate_count=duplicate_count,
             elapsed_seconds=elapsed,
             session_id=query.session_id,
+            errors_per_channel=errors_per_channel,
         )
 
     async def close(self) -> None:
@@ -205,13 +230,16 @@ class DiscoveryOrchestrator:
         for i, result in enumerate(results):
             channel = channels[i]
             if isinstance(result, BaseException):
+                error_msg = str(result)
                 logger.warning(
                     "orchestrator_channel_failed",
                     channel=channel.value,
-                    error=str(result),
+                    error=error_msg,
                     note="Continuing with empty result",
                 )
-                channel_results.append(ChannelResult(channel=channel, candidates=[]))
+                channel_results.append(
+                    ChannelResult(channel=channel, candidates=[], errors=[error_msg]),
+                )
             else:
                 channel_results.append(result)
 
@@ -248,6 +276,11 @@ class DiscoveryOrchestrator:
 
         if channel == DiscoveryChannel.SEED_EXPANSION:
             seed_urls = query.seed_urls or []
+            if not seed_urls and query.auto_seed:
+                return await self._seed_expansion.expand(
+                    seed_urls=[],
+                    auto_seed_query=query.query,
+                )
             if not seed_urls:
                 return ChannelResult(channel=channel, candidates=[])
             return await self._seed_expansion.expand(seed_urls)
@@ -263,7 +296,8 @@ class DiscoveryOrchestrator:
 
         For duplicates, keeps the candidate with the highest base
         discovery_score. Tracks all channels that found each candidate
-        for breadth and quality bonuses.
+        for breadth and quality bonuses. Applies recency boost for
+        recently pushed repos (H2).
 
         Args:
             channel_results: Results from all channels.
@@ -271,6 +305,9 @@ class DiscoveryOrchestrator:
         Returns:
             Tuple of (deduplicated candidates, duplicate count).
         """
+        now = datetime.now(UTC)
+        recency_cutoff = now - timedelta(days=_RECENCY_BOOST_WINDOW_DAYS)
+
         # Track: full_name → (best candidate, set of channels)
         seen: dict[str, tuple[RepoCandidate, set[DiscoveryChannel]]] = {}
         duplicate_count = 0
@@ -288,12 +325,16 @@ class DiscoveryOrchestrator:
                 else:
                     seen[name] = (candidate, {candidate.source_channel})
 
-        # Apply scoring bonuses
+        # Apply scoring bonuses (breadth + quality + recency)
         candidates: list[RepoCandidate] = []
         for _name, (candidate, channels) in seen.items():
+            # H2: Check recency from pushed_at
+            is_recent = candidate.pushed_at is not None and candidate.pushed_at >= recency_cutoff
+
             new_score = self._calculate_discovery_score(
                 base_score=candidate.discovery_score,
                 channels=channels,
+                is_recent=is_recent,
             )
             candidates.append(candidate.model_copy(update={"discovery_score": new_score}))
 
@@ -303,18 +344,21 @@ class DiscoveryOrchestrator:
         self,
         base_score: float,
         channels: set[DiscoveryChannel],
+        is_recent: bool = False,
     ) -> float:
-        """Calculate discovery score with breadth and quality bonuses.
+        """Calculate discovery score with breadth, quality, and recency bonuses.
 
         Formula:
-            base + breadth_bonus + channel_quality_bonus
+            base + breadth_bonus + channel_quality_bonus + recency_bonus
             breadth_bonus = 0.1 * (num_channels - 1)
             channel_quality_bonus = sum of per-channel bonuses
+            recency_bonus = 0.05 if pushed within 30 days
             Capped at 1.0.
 
         Args:
             base_score: The candidate's base discovery score from the channel.
             channels: Set of all channels that found this candidate.
+            is_recent: Whether the repo was pushed within the recency window (H2).
 
         Returns:
             Adjusted discovery score, capped at 1.0.
@@ -328,6 +372,10 @@ class DiscoveryOrchestrator:
         # Channel quality bonus: certain channels add a trust signal
         for channel in channels:
             score += _CHANNEL_QUALITY_BONUSES.get(channel, 0.0)
+
+        # H2: Recency boost — actively maintained repos get a small discovery bonus
+        if is_recent:
+            score += _RECENCY_BOOST_AMOUNT
 
         return min(score, _MAX_DISCOVERY_SCORE)
 

@@ -106,6 +106,11 @@ class HeuristicFallback(BaseModel):
         description="Warning about score reliability",
     )
 
+    @classmethod
+    def confidence_cap(cls) -> float:
+        """Return the confidence cap for heuristic fallback scores (≤ 0.25)."""
+        return 0.20
+
 
 class AssessmentContext(BaseModel):
     """Full context for an assessment operation on a pool.

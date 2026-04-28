@@ -726,6 +726,63 @@ Fase 2 addresses findings from an independent 4-LLM audit of the scoring pipelin
 - **CI green**: 1587 tests passing, ruff clean, mypy --strict clean
 - Updated wiki pages: `patterns/phase5-scoring-implementation.md`, `domain/scoring-dimensions.md`, `index.md`
 
+## [2026-04-28] lint | Wiki health check + state refresh
+- 1773 tests passing (+98 from last session), ruff clean, mypy --strict clean (145 files)
+- 25+ new files since project start (Dockerfile, release workflow, clone manager, SECURITY.md, CHANGELOG.md, etc.)
+- All internal cross-links valid, no MISSING markers
+- All raw source references verified (pointing to project files in docs/foundation/, docs/roadmaps/)
+- Waves H1-H7 (discovery robustness) all complete
+- Waves I3+I4 (clone reuse, OSV batch) complete
+- Waves N1+N4+N5 (security essentials) complete
+- Waves O1+O5 (README, CHANGELOG) complete
+- Remaining low-priority: J6-J7, I1-I2+I5+I7, L2-L7, M1-M4, N2-N3+N6, O2-O4+O6
+
+## [2026-04-27] ingest | Waves H3+H4+H6 + I4 + N1+N4+N5 + O1+O5 — Remaining GA waves
+- H3: Curated channel resilience (GitHub Topic search fallback, caching, _MAX_CURATED_PER_LIST=200)
+- H4: Registry channel crates.io + Maven Central (2 new endpoints + 16 tests)
+- H6: Seed expansion auto-seed from query (query.auto_seed=True, 12 tests)
+- I4: OSV batch query adoption (POST /v1/querybatch, tenacity retry, 38 tests)
+- N1: pip-audit CI step added to .github/workflows/ci.yml
+- N4: GitHub token scope check in doctor CLI (X-OAuth-Scopes header)
+- N5: SECURITY.md + .github/CODEOWNERS created
+- O1: README.md rewritten with 60s Quick Start, anti-bias philosophy, install matrix
+- O5: CHANGELOG.md created with v0.3.0-beta release notes
+- CI: 1773 tests passing (+98 from last session), ruff clean, mypy --strict clean (145 files)
+- 50 new tests added across H3+H4+H6+I4
+
+## [2026-04-27] wiki sync | Project state refresh
+- Test count: 1723 (was 1675), ruff clean, mypy strict clean (145 files)
+- Version: 0.3.0-beta (was 0.1.0-alpha)
+- Release: .github/workflows/release.yml, Dockerfile
+- 12 new files: invariants tests, HTTP tests, clone manager, Dockerfile, examples, workflows
+- Remaining work: Waves H3-H6 (discovery), I4-I7 (screening), M (observability), N (security), O (docs)
+
+## [2026-04-27] ingest | Wave H — Discovery Robustness + Wave I3 — Clone Reuse
+- Implemented Wave H1 (adaptive activity filter): domain-aware pushed:> threshold for LANG_TOOL (365d), SECURITY_TOOL (90d), default (180d); `GHDISC_DISCOVERY_ACTIVITY_DAYS` override
+- Implemented Wave H2 (recency boost): `_calculate_discovery_score` gets `is_recent` param; repos pushed within 30d get +0.05 bonus
+- Implemented Wave H7 (channel observability): `ChannelResult.errors` field, per-channel structured logging, `DiscoveryResult.errors_per_channel`
+- Implemented Wave I3 (clone reuse): `CloneManager` singleton with refcounted shallow clones; 6 new tests; `screening/clone_manager.py`
+- 4 new tests for H1+H2, 6 new tests for I3
+- CI: 1723 tests passing (+46), ruff clean, mypy --strict clean
+
+## [2026-04-27] ingest | v1.0.0 GA Decisions — Wave G+J+K+L Implementation
+- Implemented Waves G4, J1-J5+J8, K1-K4, L1 from the final deployment plan
+- Created `architecture/v1-ga-decisions.md` — comprehensive decision log
+- **Wave G4**: 28 invariant tests (INV-1 through INV-10) in `tests/invariants/test_anti_bias_contract.py`
+- **Wave J1**: Dual transport CI — 5 HTTP transport tests in `tests/mcp/test_streamable_http.py`
+- **Wave J2**: `/health` endpoint via `@mcp.custom_route` with deep mode
+- **Wave J4**: API key auth middleware (`GHDISC_MCP_API_KEYS`) + 5 auth tests
+- **Wave J5**: SIGTERM handler + `cleanup_orphan_clones()` on shutdown
+- **Wave J8**: `SessionManager.prune()` + `ghdisc db sessions` CLI command
+- **Wave K1**: Version aligned to `0.3.0-beta` (was `0.1.0-alpha`)
+- **Wave K2**: CLI aliases: `github-discovery`, `github-discovery-mcp`
+- **Wave K3**: `.github/workflows/release.yml` — PyPI + Docker release pipeline
+- **Wave K4**: `Dockerfile` (multi-stage distroless) + `.dockerignore`
+- **Wave L1**: `.mcp.json.example`, `.kilo/mcp.json.example` (UVX-based)
+- CI status: 1713 tests passing (+38), ruff clean, mypy --strict clean (145 files)
+- 8 new files, 7 modified files
+- Updated wiki index.md with new article entry
+
 ## [2026-04-26] ingest | Fase 2 documentation deliverables
 
 - Created `docs/foundation/SCORING_METHODOLOGY.md` (545 lines) — T2.1 deliverable: full derivation map with rationale, per-dimension design decisions, formula documentation, references (8 citations), 12 domain profiles, sub-score cross-reference

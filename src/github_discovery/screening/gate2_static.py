@@ -38,6 +38,7 @@ from github_discovery.models.screening import (
     VulnerabilityScore,
 )
 from github_discovery.screening.complexity import ComplexityAnalyzer
+from github_discovery.screening.constants import FALLBACK_CONFIDENCE, FALLBACK_VALUE
 from github_discovery.screening.osv_adapter import OsvAdapter
 from github_discovery.screening.scorecard_adapter import ScorecardAdapter
 from github_discovery.screening.secrets_check import SecretsChecker
@@ -48,8 +49,6 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger("github_discovery.screening.gate2")
 
-_FALLBACK_SCORE = 0.3
-_FALLBACK_CONFIDENCE = 0.0
 _CLONE_TIMEOUT = 120.0
 _DEFAULT_CLONE_PREFIX = "ghdisc_"
 
@@ -154,11 +153,22 @@ class Gate2StaticScreener:
             )
             shutil.rmtree(clone_dir, ignore_errors=True)
             return None
-        except Exception as e:
+        except OSError as e:
+            # git binary not found, disk full, permission denied, etc.
             logger.warning(
-                "gate2_clone_error",
+                "gate2_clone_os_error",
                 repo=candidate.full_name,
                 error=str(e),
+            )
+            shutil.rmtree(clone_dir, ignore_errors=True)
+            return None
+        except Exception as e:
+            # Truly unexpected error — log with error level for visibility
+            logger.error(
+                "gate2_clone_unexpected_error",
+                repo=candidate.full_name,
+                error=str(e),
+                error_type=type(e).__name__,
             )
             shutil.rmtree(clone_dir, ignore_errors=True)
             return None
@@ -208,8 +218,8 @@ class Gate2StaticScreener:
                     logger.warning("gate2_tool_error", tool="scorecard", error=str(e))
                     tools_failed.append("scorecard")
                     return SecurityHygieneScore(
-                        value=_FALLBACK_SCORE,
-                        confidence=_FALLBACK_CONFIDENCE,
+                        value=FALLBACK_VALUE,
+                        confidence=FALLBACK_CONFIDENCE,
                         notes=[f"Scorecard error: {e}"],
                     )
 
@@ -222,8 +232,8 @@ class Gate2StaticScreener:
                     logger.warning("gate2_tool_error", tool="osv", error=str(e))
                     tools_failed.append("osv")
                     return VulnerabilityScore(
-                        value=_FALLBACK_SCORE,
-                        confidence=_FALLBACK_CONFIDENCE,
+                        value=FALLBACK_VALUE,
+                        confidence=FALLBACK_CONFIDENCE,
                         notes=[f"OSV error: {e}"],
                     )
 
@@ -236,8 +246,8 @@ class Gate2StaticScreener:
                     logger.warning("gate2_tool_error", tool="gitleaks", error=str(e))
                     tools_failed.append("gitleaks")
                     return SecretHygieneScore(
-                        value=_FALLBACK_SCORE,
-                        confidence=_FALLBACK_CONFIDENCE,
+                        value=FALLBACK_VALUE,
+                        confidence=FALLBACK_CONFIDENCE,
                         notes=[f"Gitleaks error: {e}"],
                     )
 
@@ -250,8 +260,8 @@ class Gate2StaticScreener:
                     logger.warning("gate2_tool_error", tool="scc", error=str(e))
                     tools_failed.append("scc")
                     return ComplexityScore(
-                        value=_FALLBACK_SCORE,
-                        confidence=_FALLBACK_CONFIDENCE,
+                        value=FALLBACK_VALUE,
+                        confidence=FALLBACK_CONFIDENCE,
                         notes=[f"scc error: {e}"],
                     )
 
@@ -276,7 +286,7 @@ class Gate2StaticScreener:
                 threshold_used=threshold_val,
             )
 
-            result.gate2_total = result.compute_total()
+            result.gate2_total, result.gate2_coverage = result.compute_total()
             result.gate2_pass = result.gate2_total >= threshold_val
 
             return result

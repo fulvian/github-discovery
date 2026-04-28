@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from github_discovery.assessment.types import HeuristicFallback, HeuristicScores
 from github_discovery.models.assessment import (
     DeepAssessmentResult,
     DimensionScore,
@@ -237,6 +238,9 @@ class ResultParser:
             ScoreDimension.INNOVATION: 0.5,  # Cannot assess without LLM
         }
 
+        # TC3: Use HeuristicFallback (cap ≤ 0.25) for confidence, not literal 0.3
+        _HEURISTIC_CONFIDENCE_CAP = HeuristicFallback.confidence_cap()  # ≤ 0.25
+
         dimensions: dict[ScoreDimension, DimensionScore] = {}
         for dim, score in heuristic_map.items():
             dimensions[dim] = DimensionScore(
@@ -244,7 +248,7 @@ class ResultParser:
                 value=min(max(score, 0.0), 1.0),
                 explanation="Heuristic fallback (LLM assessment unavailable)",
                 evidence=[],
-                confidence=0.3,  # Low confidence for heuristic-only
+                confidence=_HEURISTIC_CONFIDENCE_CAP,
                 assessment_method="heuristic",
             )
 
@@ -263,7 +267,8 @@ class ResultParser:
             dimensions=dimensions,
             overall_quality=overall_quality,
             overall_explanation="Assessment based on heuristic analysis only (LLM unavailable)",
-            overall_confidence=0.3,
+            overall_confidence=_HEURISTIC_CONFIDENCE_CAP,
+            degraded=True,  # All dimensions use heuristic fallback
             gate3_pass=overall_quality >= gate3_threshold,
             gate3_threshold=gate3_threshold,
         )
@@ -276,6 +281,9 @@ class ResultParser:
         """Fill missing dimensions with heuristic-based scores."""
         result = dict(dimensions)
         base_score = heuristic_scores.structure_score
+
+        # TC3: Use HeuristicFallback confidence cap (≤ 0.25), not literal 0.3
+        _HF_CAP = HeuristicFallback.confidence_cap()
 
         heuristic_defaults: dict[ScoreDimension, tuple[float, str]] = {
             ScoreDimension.CODE_QUALITY: (
@@ -316,7 +324,7 @@ class ResultParser:
                     value=min(max(score, 0.0), 1.0),
                     explanation=explanation,
                     evidence=[],
-                    confidence=0.3,
+                    confidence=_HF_CAP,
                     assessment_method="heuristic",
                 )
 
@@ -349,10 +357,24 @@ class ResultParser:
         self,
         dimensions: dict[ScoreDimension, DimensionScore],
     ) -> float:
-        """Compute overall confidence as minimum of dimension confidences."""
+        """Compute overall confidence as weighted average of dimension confidences.
+
+        TC4: Uses profile-based weighting (DEFAULT_PROFILE for assessment phase),
+        not min(). A single heuristic fallback (conf≈0.2, low weight) won't
+        defl ate overall confidence if the other 7 dimensions are LLM-based (conf≈0.7).
+        """
         if not dimensions:
             return 0.0
-        return min(ds.confidence for ds in dimensions.values())
+        profile = get_domain_profile(DomainType.OTHER)
+        weighted_sum = 0.0
+        weight_sum = 0.0
+        for dim, ds in dimensions.items():
+            w = profile.dimension_weights.get(dim, 0.0)
+            weighted_sum += ds.confidence * w
+            weight_sum += w
+        if weight_sum <= 0:
+            return 0.0
+        return weighted_sum / weight_sum
 
     def _parse_dimension_name(self, name: str) -> ScoreDimension | None:
         """Parse a dimension name string to ScoreDimension enum.

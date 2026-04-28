@@ -20,6 +20,7 @@ from pathlib import Path
 import aiosqlite
 import structlog
 
+from github_discovery.models.assessment import DeepAssessmentResult, DimensionScore, TokenUsage
 from github_discovery.models.enums import DomainType, ScoreDimension
 from github_discovery.models.scoring import ScoreResult
 from github_discovery.scoring.types import FeatureStoreStats
@@ -38,6 +39,7 @@ CREATE TABLE IF NOT EXISTS score_features (
     gate1_total REAL NOT NULL DEFAULT 0.0,
     gate2_total REAL NOT NULL DEFAULT 0.0,
     gate3_available INTEGER NOT NULL DEFAULT 0,
+    degraded INTEGER,
     dimension_scores TEXT NOT NULL DEFAULT '{}',
     scored_at TEXT NOT NULL,
     ttl_hours INTEGER NOT NULL DEFAULT 48,
@@ -49,6 +51,25 @@ CREATE INDEX IF NOT EXISTS idx_score_features_domain
     ON score_features(domain);
 CREATE INDEX IF NOT EXISTS idx_score_features_scored_at
     ON score_features(scored_at);
+
+CREATE TABLE IF NOT EXISTS assessment_results (
+    full_name TEXT NOT NULL,
+    commit_sha TEXT NOT NULL,
+    overall_quality REAL NOT NULL DEFAULT 0.0,
+    overall_confidence REAL NOT NULL DEFAULT 0.0,
+    gate3_pass INTEGER NOT NULL DEFAULT 0,
+    gate3_threshold REAL NOT NULL DEFAULT 0.6,
+    token_usage TEXT NOT NULL DEFAULT '{}',
+    assessed_at TEXT NOT NULL,
+    assessment_duration_seconds REAL NOT NULL DEFAULT 0.0,
+    cached INTEGER NOT NULL DEFAULT 0,
+    degraded INTEGER NOT NULL DEFAULT 0,
+    dimension_scores TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (full_name, commit_sha)
+);
+
+CREATE INDEX IF NOT EXISTS idx_assessment_results_assessed_at
+    ON assessment_results(assessed_at);
 """
 
 # Indexes added post-migration (require expires_at column)
@@ -60,6 +81,11 @@ CREATE INDEX IF NOT EXISTS idx_score_features_expires_at
 # Migration SQL: add expires_at column to existing databases
 _MIGRATION_SQL = """
 ALTER TABLE score_features ADD COLUMN expires_at TEXT;
+"""
+
+# Migration SQL: add degraded column to existing databases
+_MIGRATION_DEGRADED_SQL = """
+ALTER TABLE score_features ADD COLUMN degraded INTEGER;
 """
 
 
@@ -99,6 +125,9 @@ class FeatureStore:
             # Run migration for existing databases missing expires_at column
             with contextlib.suppress(Exception):
                 await self._db.execute(_MIGRATION_SQL)
+            # Run migration for existing databases missing degraded column
+            with contextlib.suppress(Exception):
+                await self._db.execute(_MIGRATION_DEGRADED_SQL)
             # Create index on expires_at (safe after migration)
             with contextlib.suppress(Exception):
                 await self._db.executescript(_POST_MIGRATION_INDEX_SQL)
@@ -146,8 +175,8 @@ class FeatureStore:
             INSERT OR REPLACE INTO score_features
                 (full_name, commit_sha, domain, quality_score, value_score,
                  confidence, stars, gate1_total, gate2_total, gate3_available,
-                 dimension_scores, scored_at, ttl_hours, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 degraded, dimension_scores, scored_at, ttl_hours, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 result.full_name,
@@ -160,6 +189,7 @@ class FeatureStore:
                 result.gate1_total,
                 result.gate2_total,
                 1 if result.gate3_available else 0,
+                1 if result.degraded else (0 if result.degraded is not None else None),
                 dim_json,
                 result.scored_at.isoformat(),
                 self._ttl_hours,
@@ -167,6 +197,92 @@ class FeatureStore:
             ),
         )
         await db.commit()
+
+    async def put_assessment(self, result: DeepAssessmentResult) -> None:
+        """Store a deep assessment result. Upsert on full_name + commit_sha.
+
+        Args:
+            result: DeepAssessmentResult to persist.
+        """
+        db = await self._get_db()
+        dim_json = self._serialize_assessment_dimensions(result.dimensions)
+        token_usage_json = result.token_usage.model_dump_json()
+
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO assessment_results
+                (full_name, commit_sha, overall_quality, overall_confidence,
+                 gate3_pass, gate3_threshold, token_usage, assessed_at,
+                 assessment_duration_seconds, cached, degraded, dimension_scores)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                result.full_name,
+                result.commit_sha,
+                result.overall_quality,
+                result.overall_confidence,
+                1 if result.gate3_pass else 0,
+                result.gate3_threshold,
+                token_usage_json,
+                result.assessed_at.isoformat(),
+                result.assessment_duration_seconds,
+                1 if result.cached else 0,
+                1 if result.degraded else 0,
+                dim_json,
+            ),
+        )
+        await db.commit()
+
+    async def get_assessment(
+        self,
+        full_name: str,
+        commit_sha: str,
+    ) -> DeepAssessmentResult | None:
+        """Get a cached deep assessment result.
+
+        Args:
+            full_name: Repository full name (owner/repo).
+            commit_sha: Commit SHA of the assessment.
+
+        Returns:
+            DeepAssessmentResult or None if not found.
+        """
+        db = await self._get_db()
+        cursor = await db.execute(
+            "SELECT * FROM assessment_results WHERE full_name = ? AND commit_sha = ?",
+            (full_name, commit_sha),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return self._row_to_assessment(row)
+
+    async def get_assessment_batch(
+        self,
+        keys: list[tuple[str, str]],
+    ) -> dict[tuple[str, str], DeepAssessmentResult | None]:
+        """Get multiple cached assessment results at once.
+
+        Args:
+            keys: List of (full_name, commit_sha) tuples.
+
+        Returns:
+            Dict keyed by (full_name, commit_sha) tuple with DeepAssessmentResult or None.
+        """
+        results: dict[tuple[str, str], DeepAssessmentResult | None] = {}
+        for full_name, commit_sha in keys:
+            results[(full_name, commit_sha)] = await self.get_assessment(full_name, commit_sha)
+        return results
+
+    async def delete_assessment(self, full_name: str, commit_sha: str) -> bool:
+        """Delete a cached assessment result. Returns True if existed."""
+        db = await self._get_db()
+        cursor = await db.execute(
+            "DELETE FROM assessment_results WHERE full_name = ? AND commit_sha = ?",
+            (full_name, commit_sha),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
 
     async def get_batch(
         self,
@@ -405,6 +521,12 @@ class FeatureStore:
             with contextlib.suppress(ValueError):
                 dimension_scores[ScoreDimension(k)] = v
 
+        # Handle nullable degraded column (may be None in old databases)
+        degraded_val = row["degraded"]
+        degraded: bool | None = None
+        if degraded_val is not None:
+            degraded = bool(degraded_val)
+
         return ScoreResult(
             full_name=row["full_name"],
             commit_sha=row["commit_sha"],
@@ -416,5 +538,64 @@ class FeatureStore:
             gate1_total=row["gate1_total"],
             gate2_total=row["gate2_total"],
             gate3_available=bool(row["gate3_available"]),
+            degraded=degraded,
             scored_at=datetime.fromisoformat(row["scored_at"]),
+        )
+
+    def _serialize_assessment_dimensions(
+        self,
+        dims: dict[ScoreDimension, DimensionScore],
+    ) -> str:
+        """Serialize dimension scores with full DimensionScore data to JSON string."""
+        return json.dumps(
+            {
+                k.value: {
+                    "value": v.value,
+                    "confidence": v.confidence,
+                    "explanation": v.explanation,
+                    "evidence": v.evidence,
+                    "assessment_method": v.assessment_method,
+                }
+                for k, v in dims.items()
+            }
+        )
+
+    def _row_to_assessment(self, row: aiosqlite.Row) -> DeepAssessmentResult:
+        """Convert a database row to DeepAssessmentResult."""
+        dim_raw = json.loads(row["dimension_scores"])
+        dimension_scores: dict[ScoreDimension, DimensionScore] = {}
+        for k, v in dim_raw.items():
+            with contextlib.suppress(ValueError):
+                dimension_scores[ScoreDimension(k)] = DimensionScore(
+                    dimension=ScoreDimension(k),
+                    value=v["value"],
+                    confidence=v.get("confidence", 0.5),
+                    explanation=v.get("explanation", ""),
+                    evidence=v.get("evidence", []),
+                    assessment_method=v.get("assessment_method", "llm"),
+                )
+
+        token_usage_raw = json.loads(row["token_usage"])
+        token_usage = TokenUsage(
+            prompt_tokens=token_usage_raw.get("prompt_tokens", 0),
+            completion_tokens=token_usage_raw.get("completion_tokens", 0),
+            total_tokens=token_usage_raw.get("total_tokens", 0),
+            model_used=token_usage_raw.get("model_used", ""),
+            provider=token_usage_raw.get("provider", ""),
+            token_usage_source=token_usage_raw.get("token_usage_source", "unknown"),
+        )
+
+        return DeepAssessmentResult(
+            full_name=row["full_name"],
+            commit_sha=row["commit_sha"],
+            dimensions=dimension_scores,
+            overall_quality=row["overall_quality"],
+            overall_confidence=row["overall_confidence"],
+            gate3_pass=bool(row["gate3_pass"]),
+            gate3_threshold=row["gate3_threshold"],
+            token_usage=token_usage,
+            assessed_at=datetime.fromisoformat(row["assessed_at"]),
+            assessment_duration_seconds=row["assessment_duration_seconds"],
+            cached=bool(row["cached"]),
+            degraded=bool(row["degraded"]),
         )

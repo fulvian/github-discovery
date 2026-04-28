@@ -93,6 +93,38 @@ GitHubDiscoveryError (base)
 - **Clone directories**: Orphan cleanup at MCP server startup (`cleanup_orphan_clones()`) removes stale clones from interrupted runs
 - **`ghdisc db prune` CLI**: Manual FeatureStore cleanup with dry-run support
 
+## Production Readiness v1 — Assessment Improvements (2026-04-27)
+
+### Hard Daily Limit (`hard_daily_limit`)
+
+The assessment budget system now enforces a hard daily limit as a true ceiling:
+
+- `AssessmentSettings.hard_daily_limit` (env: `GHDISC_ASSESSMENT_HARD_DAILY_LIMIT`, default=0=disabled)
+- When enabled, `BudgetController.check_daily_soft_limit()` first checks hard limit and raises `BudgetExceededError(budget_type="daily_hard")` when exceeded — blocks assessment rather than warn
+- Soft limit remains at 2M tokens with warning-only enforcement (does not block)
+
+### Persistent Assessment Cache (FeatureStore cross-session)
+
+`FeatureStore` now persists `DeepAssessmentResult` across sessions:
+
+- `assessment_results` table stores full `DimensionScore` arrays for each repo
+- `put_assessment()`, `get_assessment()`, `get_assessment_batch()`, `delete_assessment()`
+- `_serialize_assessment_dimensions()` / `_row_to_assessment()` for complete `DimensionScore` serialization
+- `AssessmentOrchestrator` accepts `feature_store: FeatureStore | None`; results loaded from persistent store on init
+- MCP server passes `feature_store` to orchestrator for cross-session cache continuity
+
+### Content Strategy (Adaptive Token Limits + Degraded Flag)
+
+Adaptive content truncation ensures token budget is never exceeded:
+
+- `ContentStrategy` computes max tokens based on `remaining_budget`, `n_repos`, `repo_sizes`
+- `AdaptiveHeuristicChunker` chunk sizes: `target_tokens = max(500, remaining_budget // n_repos)`
+- `ContentTruncationHeuristic` detects truncation via content similarity drop (`THRESHOLD=0.70`)
+- `HeuristicFallback` uses additive structure scoring (files, avg size, pattern matches) when content is truncated
+- `ScoreResult.degraded: bool | None` field signals when scores may be unreliable due to content truncation
+  - `ScoringEngine.score()` passes `degraded=assessment.degraded` when building result
+  - CLI `rank` command shows `degraded` column to surface score uncertainty
+
 ## See Also
 
 - [Agent Workflow Patterns](agent-workflows.md)

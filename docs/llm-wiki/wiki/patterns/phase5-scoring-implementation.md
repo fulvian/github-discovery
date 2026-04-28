@@ -73,15 +73,30 @@ Post-independent audit by 4 LLM auditors (Claude, Gemini, ChatGPT, Perplexity). 
 - **T5.3 — Custom profiles YAML/TOML loading**: `ProfileRegistry` gains `load_from_yaml()`, `load_from_toml()`, `load_custom_profiles()` (auto-detects format). `_parse_profile_entry()` parses YAML/TOML dicts into `DomainProfile` with case-insensitive domain_type matching, derivation_map support, weight validation.
 - **T5.3 wiring**: `custom_profiles_path` in `ScoringSettings` auto-loads into both `ScoringEngine._registry` and `ScreeningOrchestrator._profile_registry`.
 - **T5.4 — DEPRECATED**: `is_hidden_gem` on `ScoreResult` and `RankedRepo` marked `.. deprecated:: 0.2.0` with removal planned for v0.3.0. Not removed because (1) bug already fixed in T1.1 (single source of truth achieved), (2) 11 consumers would break, (3) standard deprecation pattern is deprecate-first, remove-next-major. Canonical source is `ValueScoreCalculator.is_hidden_gem()`.
-- **T5.5 — Property-Based Tests (Hypothesis)**
+### Wave 6 — Production Readiness Additions (TF1, TE2)
 
-11 Hypothesis-based tests covering 1000+ generated inputs:
-- ScoreResult bounds: quality_score, confidence, coverage ∈ [0,1]
-- Star neutrality: value_score == quality_score regardless of stars
-- Coverage damping: quality_score ≤ raw_quality_score when coverage < 1
-- Profile weight sum: all 12 domain profiles sum to ~1.0
-- Profile completeness: all profiles cover all 8 dimensions
-- Determinism: identical inputs produce identical outputs
+**TF1 — ScoreResult.degraded field**: Added `degraded: bool | None` field to `ScoreResult`. Tracks whether Gate 3 assessment used heuristic fallbacks for any dimension (indicating degraded quality due to LLM failures or content truncation). `None` when no deep assessment was performed. `ScoringEngine.score()` sets `degraded=assessment.degraded` when creating `ScoreResult`.
+
+**TE2 — Persistent DeepAssessmentResult cache**: New `assessment_results` table in `FeatureStore` (`scoring/feature_store.py`). Stores `DeepAssessmentResult` per `full_name + commit_sha` with full dimension scores, token usage, and degraded flag. Added `put_assessment()`, `get_assessment()`, `get_assessment_batch()`, `delete_assessment()` methods. `AssessmentOrchestrator` now accepts optional `feature_store` parameter and persists `DeepAssessmentResult` for cross-session caching (in addition to in-memory cache).
+
+**FeatureStore assessment schema**:
+```sql
+CREATE TABLE IF NOT EXISTS assessment_results (
+    full_name TEXT NOT NULL,
+    commit_sha TEXT NOT NULL,
+    overall_quality REAL NOT NULL DEFAULT 0.0,
+    overall_confidence REAL NOT NULL DEFAULT 0.0,
+    gate3_pass INTEGER NOT NULL DEFAULT 0,
+    gate3_threshold REAL NOT NULL DEFAULT 0.6,
+    token_usage TEXT NOT NULL DEFAULT '{}',
+    assessed_at TEXT NOT NULL,
+    assessment_duration_seconds REAL NOT NULL DEFAULT 0.0,
+    cached INTEGER NOT NULL DEFAULT 0,
+    degraded INTEGER NOT NULL DEFAULT 0,
+    dimension_scores TEXT NOT NULL DEFAULT '{}',
+    PRIMARY KEY (full_name, commit_sha)
+);
+```
 
 ## Key Architecture Decisions
 

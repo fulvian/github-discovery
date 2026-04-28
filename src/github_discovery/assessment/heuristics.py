@@ -48,6 +48,16 @@ _CI_PATTERNS: tuple[str, ...] = (
     "travis",
 )
 
+# TD1: Path-based patterns — used as primary detection when file_paths available.
+_CI_PATH_PATTERNS: tuple[str, ...] = (
+    ".github/workflows/",
+    "Jenkinsfile",
+    ".gitlab-ci.yml",
+    ".circleci/config",
+    "azure-pipelines.yml",
+    "bitbucket-pipelines.yml",
+)
+
 _DOC_PATTERNS: tuple[str, ...] = (
     "README",
     "docs/",
@@ -56,12 +66,34 @@ _DOC_PATTERNS: tuple[str, ...] = (
     ".rst",
 )
 
+# TD2: Path-based patterns for docs detection.
+_DOC_PATH_PATTERNS: tuple[str, ...] = (
+    "README.md",
+    "README.rst",
+    "README.txt",
+    "docs/",
+    "CONTRIBUTING.md",
+    "CHANGELOG.md",
+    "CHANGELOG.rst",
+)
+
 _SECURITY_PATTERNS: tuple[str, ...] = (
     "SECURITY.md",
     ".secretsignore",
     "dependabot.yml",
     "renovate.json",
     "scorecard",
+    "openssf",
+)
+
+# TD2: Path-based patterns for security detection.
+_SECURITY_PATH_PATTERNS: tuple[str, ...] = (
+    "SECURITY.md",
+    ".github/dependabot.yml",
+    ".github/renovate.json",
+    "renovate.json",
+    ".snyk",
+    "renovate.bot.json",
 )
 
 # Directories that typically contain test files.
@@ -223,16 +255,42 @@ class HeuristicAnalyzer:
         return any(p.lower() in content_lower for p in _TEST_DIR_PATTERNS)
 
     def _detect_ci(self, content: str) -> bool:
-        """Detect CI/CD configuration from content."""
+        """Detect CI/CD configuration from content.
+
+        TD1: Uses path-based detection as primary (authoritative when file
+        paths are available from Repomix headers). Falls back to content
+        substring match when no file headers are found.
+        """
+        file_paths = _extract_file_paths(content)
+        if file_paths:
+            # Path-based detection is authoritative — avoids false
+            # positives from "GitHub Actions" appearing in prose.
+            for path_str in file_paths:
+                for pattern in _CI_PATH_PATTERNS:
+                    if pattern in path_str:
+                        return True
+            return False
+        # Legacy fallback when Repomix file headers are not available.
         content_lower = content.lower()
         return any(pattern.lower() in content_lower for pattern in _CI_PATTERNS)
 
     def _detect_docs(self, content: str) -> bool:
         """Detect documentation presence from content.
 
+        TD2: Uses path-based detection as primary. Falls back to content
+        substring match when no file headers are available.
+
         Special handling for '.md' — only counts if it appears as
         part of a filename path (not just the string '.md' in prose).
         """
+        file_paths = _extract_file_paths(content)
+        if file_paths:
+            for path_str in file_paths:
+                for pattern in _DOC_PATH_PATTERNS:
+                    if pattern in path_str:
+                        return True
+            return False
+        # Legacy fallback: content substring match.
         content_lower = content.lower()
         for pattern in _DOC_PATTERNS:
             if pattern.lower() in content_lower:
@@ -241,7 +299,18 @@ class HeuristicAnalyzer:
         return bool(re.search(r"\b\w+\.md\b", content_lower))
 
     def _detect_security(self, content: str) -> bool:
-        """Detect security policy files from content."""
+        """Detect security policy files from content.
+
+        TD2: Uses path-based detection as primary (authoritative when file
+        paths are available). Falls back to content substring match.
+        """
+        file_paths = _extract_file_paths(content)
+        if file_paths:
+            for path_str in file_paths:
+                for pattern in _SECURITY_PATH_PATTERNS:
+                    if pattern in path_str:
+                        return True
+            return False
         content_lower = content.lower()
         return any(pattern.lower() in content_lower for pattern in _SECURITY_PATTERNS)
 

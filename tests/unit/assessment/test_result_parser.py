@@ -7,6 +7,8 @@ and Gate 3 threshold behavior.
 
 from __future__ import annotations
 
+import pytest
+
 from github_discovery.assessment.result_parser import ResultParser
 from github_discovery.assessment.types import (
     HeuristicScores,
@@ -283,7 +285,8 @@ class TestCreateHeuristicFallback:
 
         assert len(result.dimensions) == 8
         assert result.full_name == "test/repo"
-        assert result.overall_confidence == 0.3
+        # TC3: overall_confidence = HeuristicFallback.confidence_cap() = 0.2
+        assert result.overall_confidence == 0.2
 
     def test_fallback_all_heuristic_method(self) -> None:
         """All fallback dimensions have assessment_method='heuristic'."""
@@ -297,7 +300,8 @@ class TestCreateHeuristicFallback:
 
         for dim_score in result.dimensions.values():
             assert dim_score.assessment_method == "heuristic"
-            assert dim_score.confidence == 0.3
+            # TC3: confidence capped at HeuristicFallback.confidence_cap() = 0.2
+            assert dim_score.confidence == 0.2
 
     def test_fallback_testing_high_when_tests_present(self) -> None:
         """Heuristic TESTING score is 0.6 when has_tests=True."""
@@ -483,7 +487,10 @@ class TestComputeOverallConfidence:
             ),
         }
         confidence = parser._compute_overall_confidence(dims)
-        assert confidence == 0.5
+        # TC4: Weighted average of confidences (not min).
+        # CODE_QUALITY weight=0.2, TESTING weight=0.15.
+        # Weighted avg = (0.9*0.2 + 0.5*0.15) / (0.2+0.15) = 0.7286
+        assert confidence == pytest.approx(0.728571)
 
     def test_single_dimension_confidence(self) -> None:
         """Single dimension → confidence = that dimension's confidence."""
@@ -495,7 +502,7 @@ class TestComputeOverallConfidence:
                 confidence=0.7,
             ),
         }
-        assert parser._compute_overall_confidence(dims) == 0.7
+        assert parser._compute_overall_confidence(dims) == pytest.approx(0.7)
 
     def test_all_same_confidence(self) -> None:
         """All dimensions with same confidence → that value."""

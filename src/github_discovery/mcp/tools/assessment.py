@@ -53,6 +53,7 @@ def register_assessment_tools(mcp: FastMCP, settings: Settings) -> None:
             repo_urls: list[str],
             dimensions: list[str] | None = None,
             gate3_threshold: float = 0.6,
+            max_candidates: int = 0,
             session_id: str | None = None,
             ctx: Context[ServerSession, AppContext] | None = None,
         ) -> dict[str, object]:
@@ -62,10 +63,16 @@ def register_assessment_tools(mcp: FastMCP, settings: Settings) -> None:
             before deep assessment (Blueprint §16.5). This is the expensive
             LLM-based evaluation — use only on top percentile candidates.
 
+            IMPORTANT: For batches >3 repos, set max_candidates to process in
+            smaller groups to avoid MCP transport timeouts. Each repo requires
+            metadata enrichment + optional screening + LLM assessment.
+
             Args:
                 repo_urls: List of GitHub repository URLs to assess
                 dimensions: Subset of dimensions to assess (default: all 8)
                 gate3_threshold: Minimum Gate 3 score to pass (default: 0.6)
+                max_candidates: Max repos per call (0=all, default: 0).
+                    Set to 3-5 for large batches to avoid MCP timeouts.
                 session_id: Optional session ID for workflow continuity
                 ctx: MCP request context (injected by FastMCP)
             """
@@ -86,6 +93,16 @@ def register_assessment_tools(mcp: FastMCP, settings: Settings) -> None:
                 return format_tool_result(
                     success=False,
                     error_message="No valid repository URLs provided",
+                )
+
+            # Batch processing: limit candidates per call to avoid MCP timeouts
+            total_requested = len(candidates)
+            if max_candidates > 0 and len(candidates) > max_candidates:
+                candidates = candidates[:max_candidates]
+                logger.info(
+                    "deep_assess_batched",
+                    total_requested=total_requested,
+                    batch_size=len(candidates),
                 )
 
             # Screen candidates first (hard gate enforcement)

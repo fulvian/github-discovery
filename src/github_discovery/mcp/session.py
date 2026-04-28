@@ -6,6 +6,7 @@ progressive deepening in MCP workflows (Blueprint §21.4).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import aiosqlite
@@ -139,6 +140,42 @@ class SessionManager:
             )
         rows = await cursor.fetchall()
         return [SessionState.model_validate_json(row["data"]) for row in rows]
+
+    async def prune(
+        self,
+        *,
+        older_than_days: int = 30,
+        idle_days: int = 7,
+    ) -> int:
+        """Remove sessions older than ``older_than_days`` or idle longer than ``idle_days``.
+
+        The ``created_at`` and ``updated_at`` timestamps are stored in the
+        ``data`` JSON column.  This method uses ``json_extract`` to filter.
+
+        Args:
+            older_than_days: Delete sessions created more than N days ago (default 30).
+            idle_days: Delete sessions not updated in N days (default 7).
+
+        Returns:
+            Number of sessions pruned.
+        """
+        cutoff_created = (datetime.now(UTC) - timedelta(days=older_than_days)).isoformat()
+        cutoff_updated = (datetime.now(UTC) - timedelta(days=idle_days)).isoformat()
+
+        cursor = await self._conn.execute(
+            "DELETE FROM sessions WHERE json_extract(data, '$.created_at') < ? OR updated_at < ?",
+            (cutoff_created, cutoff_updated),
+        )
+        await self._conn.commit()
+        pruned = cursor.rowcount
+        if pruned > 0:
+            logger.info(
+                "sessions_pruned",
+                count=pruned,
+                older_than_days=older_than_days,
+                idle_days=idle_days,
+            )
+        return pruned
 
     async def _save(self, session: SessionState) -> None:
         """Upsert a session into the database."""

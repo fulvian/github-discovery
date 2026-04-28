@@ -178,6 +178,16 @@ class MetadataScreenResult(BaseModel):
     )
 
     gate1_total: float = Field(default=0.0, ge=0.0, le=1.0, description="Weighted composite score")
+    gate1_coverage: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fraction of sub-score weight with confidence > 0 (real data). "
+            "Measures how many sub-scores had actual tool/API data vs. "
+            "fallback/heuristic values."
+        ),
+    )
     gate1_pass: bool = Field(default=False, description="Whether candidate passed Gate 1")
     threshold_used: float = Field(default=0.4, description="Threshold applied for pass/fail")
     degraded_count: int = Field(
@@ -185,8 +195,17 @@ class MetadataScreenResult(BaseModel):
         description="Number of sub-score fetches that degraded due to API errors",
     )
 
-    def compute_total(self) -> float:
-        """Compute weighted composite score from sub-scores."""
+    def compute_total(self) -> tuple[float, float]:
+        """Compute weighted composite score and coverage from sub-scores.
+
+        Returns:
+            Tuple of (damped_composite, coverage).
+            - damped_composite: coverage-aware weighted average (excludes confidence=0 sub-scores)
+            - coverage: fraction of total weight that had real data (confidence > 0)
+
+        Sub-scores with confidence <= 0 are excluded from the average;
+        coverage reports the fraction of weight that had real data.
+        """
         scores = [
             self.hygiene,
             self.maintenance,
@@ -196,10 +215,21 @@ class MetadataScreenResult(BaseModel):
             self.ci_cd,
             self.dependency_quality,
         ]
-        total_weight = sum(s.weight for s in scores)
-        if total_weight == 0:
-            return 0.0
-        return sum(s.value * s.weight for s in scores) / total_weight
+        total_weight_possible = sum(s.weight for s in scores)
+        weighted_sum = 0.0
+        weight_used = 0.0
+        for s in scores:
+            if s.confidence <= 0.0:
+                continue
+            weighted_sum += s.value * s.weight
+            weight_used += s.weight
+        if weight_used <= 0:
+            return 0.0, 0.0
+        coverage = weight_used / total_weight_possible
+        raw = weighted_sum / weight_used
+        # Damping mirroring scoring/engine.py::_apply_weights
+        damped = raw * (0.5 + 0.5 * coverage)
+        return damped, coverage
 
 
 # --- Gate 2: Static/Security Screening Sub-Scores ---
@@ -291,6 +321,15 @@ class StaticScreenResult(BaseModel):
     )
 
     gate2_total: float = Field(default=0.0, ge=0.0, le=1.0, description="Weighted composite score")
+    gate2_coverage: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fraction of sub-score weight with confidence > 0 (real data). "
+            "Measures how many sub-scores had actual tool data vs. fallback."
+        ),
+    )
     gate2_pass: bool = Field(default=False, description="Whether candidate passed Gate 2")
     threshold_used: float = Field(default=0.5, description="Threshold applied for pass/fail")
 
@@ -303,18 +342,38 @@ class StaticScreenResult(BaseModel):
         description="Tools that failed during screening (graceful degradation)",
     )
 
-    def compute_total(self) -> float:
-        """Compute weighted composite score from sub-scores."""
+    def compute_total(self) -> tuple[float, float]:
+        """Compute weighted composite score and coverage from sub-scores.
+
+        Returns:
+            Tuple of (damped_composite, coverage).
+            - damped_composite: coverage-aware weighted average (excludes confidence=0 sub-scores)
+            - coverage: fraction of total weight that had real data (confidence > 0)
+
+        Sub-scores with confidence <= 0 are excluded from the average;
+        coverage reports the fraction of weight that had real data.
+        """
         scores = [
             self.security_hygiene,
             self.vulnerability,
             self.complexity,
             self.secret_hygiene,
         ]
-        total_weight = sum(s.weight for s in scores)
-        if total_weight == 0:
-            return 0.0
-        return sum(s.value * s.weight for s in scores) / total_weight
+        total_weight_possible = sum(s.weight for s in scores)
+        weighted_sum = 0.0
+        weight_used = 0.0
+        for s in scores:
+            if s.confidence <= 0.0:
+                continue
+            weighted_sum += s.value * s.weight
+            weight_used += s.weight
+        if weight_used <= 0:
+            return 0.0, 0.0
+        coverage = weight_used / total_weight_possible
+        raw = weighted_sum / weight_used
+        # Damping mirroring scoring/engine.py::_apply_weights
+        damped = raw * (0.5 + 0.5 * coverage)
+        return damped, coverage
 
 
 # --- Combined Screening Result ---

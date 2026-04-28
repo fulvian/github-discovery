@@ -89,7 +89,7 @@ class TestScorecardAdapter:
         adapter = ScorecardAdapter()
         result = await adapter.score(_make_candidate())
 
-        assert result.value == 0.3
+        assert result.value == 0.5  # TB2 unified fallback: neutral
         assert result.confidence == 0.0
         assert "not scored" in result.notes[0].lower()
         await adapter.close()
@@ -104,7 +104,7 @@ class TestScorecardAdapter:
         adapter = ScorecardAdapter()
         result = await adapter.score(_make_candidate())
 
-        assert result.value == 0.3
+        assert result.value == 0.5  # TB2 unified fallback: neutral
         assert result.confidence == 0.0
         assert "timed out" in result.notes[0].lower()
         await adapter.close()

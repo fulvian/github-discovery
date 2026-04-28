@@ -373,6 +373,428 @@ class TestSearchNpm:
         assert result.candidates[0].full_name == "lodash/lodash"
 
 
+# --- search_crates_io ---
+
+
+class TestSearchCratesIo:
+    """Tests for crates.io registry search."""
+
+    async def test_search_crates_io_maps_to_github(self) -> None:
+        """Mock crates.io response with GitHub URL → RepoCandidate."""
+        crates_data: dict[str, object] = {
+            "crates": [
+                {
+                    "crate": {
+                        "name": "serde",
+                        "description": "A serialization framework",
+                        "homepage": "https://serde.rs",
+                        "repository": "https://github.com/serde-rs/serde",
+                        "documentation": "https://docs.rs/serde",
+                    },
+                },
+            ],
+            "meta": {"total": 1},
+        }
+        mock_response = httpx.Response(
+            200,
+            json=crates_data,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_crates_io("serde")
+
+        assert isinstance(result, ChannelResult)
+        assert result.channel == DiscoveryChannel.REGISTRY
+        assert len(result.candidates) == 1
+        assert result.candidates[0].full_name == "serde-rs/serde"
+        assert result.candidates[0].source_channel == DiscoveryChannel.REGISTRY
+        assert result.candidates[0].owner_login == "serde-rs"
+
+    async def test_search_crates_io_extracts_from_homepage(self) -> None:
+        """GitHub URL in homepage field → extracted."""
+        crates_data: dict[str, object] = {
+            "crates": [
+                {
+                    "crate": {
+                        "name": "tokio",
+                        "description": "Async runtime",
+                        "homepage": "https://github.com/tokio-rs/tokio",
+                        "repository": None,
+                    },
+                },
+            ],
+            "meta": {"total": 1},
+        }
+        mock_response = httpx.Response(
+            200,
+            json=crates_data,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_crates_io("tokio")
+
+        assert len(result.candidates) == 1
+        assert result.candidates[0].full_name == "tokio-rs/tokio"
+
+    async def test_search_crates_io_extracts_from_documentation(self) -> None:
+        """GitHub URL in documentation field → extracted."""
+        crates_data: dict[str, object] = {
+            "crates": [
+                {
+                    "crate": {
+                        "name": "my-crate",
+                        "description": "Some crate",
+                        "homepage": None,
+                        "repository": None,
+                        "documentation": "https://github.com/owner/my-crate",
+                    },
+                },
+            ],
+            "meta": {"total": 1},
+        }
+        mock_response = httpx.Response(
+            200,
+            json=crates_data,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_crates_io("my-crate")
+
+        assert len(result.candidates) == 1
+        assert result.candidates[0].full_name == "owner/my-crate"
+
+    async def test_search_crates_io_skips_no_github(self) -> None:
+        """Crate without GitHub URL → excluded from candidates."""
+        crates_data: dict[str, object] = {
+            "crates": [
+                {
+                    "crate": {
+                        "name": "some-crate",
+                        "description": "A crate without GitHub",
+                        "homepage": "https://example.com",
+                        "repository": None,
+                    },
+                },
+            ],
+            "meta": {"total": 1},
+        }
+        mock_response = httpx.Response(
+            200,
+            json=crates_data,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_crates_io("some-crate")
+
+        assert result.candidates == []
+
+    async def test_search_crates_io_handles_404(self) -> None:
+        """crates.io 404 → empty result, no exception."""
+        mock_response = httpx.Response(
+            404,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_crates_io("nonexistent")
+
+        assert isinstance(result, ChannelResult)
+        assert result.candidates == []
+        assert result.total_found == 0
+
+    async def test_search_crates_io_handles_exception(self) -> None:
+        """Network exception → empty result, no exception propagated."""
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_crates_io("serde")
+
+        assert isinstance(result, ChannelResult)
+        assert result.candidates == []
+
+    async def test_search_crates_io_respects_max_results(self) -> None:
+        """max_results parameter limits candidates returned."""
+        crates_data: dict[str, object] = {
+            "crates": [
+                {
+                    "crate": {
+                        "name": f"crate-{i}",
+                        "description": f"Crate {i}",
+                        "repository": f"https://github.com/owner/crate-{i}",
+                    },
+                }
+                for i in range(10)
+            ],
+            "meta": {"total": 10},
+        }
+        mock_response = httpx.Response(
+            200,
+            json=crates_data,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_crates_io("test", max_results=3)
+
+        assert len(result.candidates) == 3
+
+    async def test_search_crates_io_uses_user_agent(self) -> None:
+        """Crates.io requests include User-Agent header."""
+        crates_data: dict[str, object] = {
+            "crates": [],
+            "meta": {"total": 0},
+        }
+        mock_response = httpx.Response(
+            200,
+            json=crates_data,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        await channel.search_crates_io("test")
+
+        # Verify User-Agent was passed in headers kwarg
+        call_kwargs = mock_client.get.call_args
+        assert "headers" in call_kwargs.kwargs
+        assert call_kwargs.kwargs["headers"]["User-Agent"] == "github-discovery/0.3.0-beta"
+
+    async def test_search_crates_io_discovery_score(self) -> None:
+        """Crates.io candidates have discovery_score of 0.5."""
+        crates_data: dict[str, object] = {
+            "crates": [
+                {
+                    "crate": {
+                        "name": "test-crate",
+                        "description": "Test",
+                        "repository": "https://github.com/owner/test-crate",
+                    },
+                },
+            ],
+            "meta": {"total": 1},
+        }
+        mock_response = httpx.Response(
+            200,
+            json=crates_data,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_crates_io("test-crate")
+
+        assert len(result.candidates) == 1
+        assert result.candidates[0].discovery_score == 0.5
+
+
+# --- search_maven ---
+
+
+class TestSearchMaven:
+    """Tests for Maven Central registry search."""
+
+    async def test_search_maven_maps_to_github(self) -> None:
+        """Mock Maven response with GitHub URL → RepoCandidate."""
+        maven_data: dict[str, object] = {
+            "response": {
+                "numFound": 1,
+                "docs": [
+                    {
+                        "id": "com.google.guava:guava",
+                        "latestVersion": "33.0.0",
+                        "repositoryUrl": "https://github.com/google/guava",
+                    },
+                ],
+            },
+        }
+        mock_response = httpx.Response(
+            200,
+            json=maven_data,
+            request=httpx.Request("GET", "https://search.maven.org/solrsearch/select"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_maven("guava")
+
+        assert isinstance(result, ChannelResult)
+        assert result.channel == DiscoveryChannel.REGISTRY
+        assert len(result.candidates) == 1
+        assert result.candidates[0].full_name == "google/guava"
+        assert result.candidates[0].source_channel == DiscoveryChannel.REGISTRY
+        assert result.candidates[0].owner_login == "google"
+
+    async def test_search_maven_skips_no_github(self) -> None:
+        """Maven doc without GitHub URL → excluded."""
+        maven_data: dict[str, object] = {
+            "response": {
+                "numFound": 1,
+                "docs": [
+                    {
+                        "id": "com.example:lib",
+                        "latestVersion": "1.0",
+                        "repositoryUrl": "https://example.com/repo",
+                    },
+                ],
+            },
+        }
+        mock_response = httpx.Response(
+            200,
+            json=maven_data,
+            request=httpx.Request("GET", "https://search.maven.org/solrsearch/select"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_maven("lib")
+
+        assert result.candidates == []
+
+    async def test_search_maven_skips_no_repository_url(self) -> None:
+        """Maven doc with no repositoryUrl → excluded."""
+        maven_data: dict[str, object] = {
+            "response": {
+                "numFound": 1,
+                "docs": [
+                    {
+                        "id": "org.apache:commons",
+                        "latestVersion": "1.0",
+                    },
+                ],
+            },
+        }
+        mock_response = httpx.Response(
+            200,
+            json=maven_data,
+            request=httpx.Request("GET", "https://search.maven.org/solrsearch/select"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_maven("commons")
+
+        assert result.candidates == []
+
+    async def test_search_maven_handles_404(self) -> None:
+        """Maven 404 → empty result, no exception."""
+        mock_response = httpx.Response(
+            404,
+            request=httpx.Request("GET", "https://search.maven.org/solrsearch/select"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_maven("nonexistent")
+
+        assert isinstance(result, ChannelResult)
+        assert result.candidates == []
+        assert result.total_found == 0
+
+    async def test_search_maven_handles_exception(self) -> None:
+        """Network exception → empty result."""
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_maven("guava")
+
+        assert isinstance(result, ChannelResult)
+        assert result.candidates == []
+
+    async def test_search_maven_respects_max_results(self) -> None:
+        """max_results parameter limits candidates returned."""
+        maven_data: dict[str, object] = {
+            "response": {
+                "numFound": 10,
+                "docs": [
+                    {
+                        "id": f"com.example:lib-{i}",
+                        "latestVersion": "1.0",
+                        "repositoryUrl": f"https://github.com/owner/lib-{i}",
+                    }
+                    for i in range(10)
+                ],
+            },
+        }
+        mock_response = httpx.Response(
+            200,
+            json=maven_data,
+            request=httpx.Request("GET", "https://search.maven.org/solrsearch/select"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_maven("lib", max_results=3)
+
+        assert len(result.candidates) == 3
+
+    async def test_search_maven_discovery_score(self) -> None:
+        """Maven candidates have discovery_score of 0.5."""
+        maven_data: dict[str, object] = {
+            "response": {
+                "numFound": 1,
+                "docs": [
+                    {
+                        "id": "com.google.guava:guava",
+                        "latestVersion": "33.0.0",
+                        "repositoryUrl": "https://github.com/google/guava",
+                    },
+                ],
+            },
+        }
+        mock_response = httpx.Response(
+            200,
+            json=maven_data,
+            request=httpx.Request("GET", "https://search.maven.org/solrsearch/select"),
+        )
+
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        channel = RegistryChannel(http_client=mock_client)
+        result = await channel.search_maven("guava")
+
+        assert len(result.candidates) == 1
+        assert result.candidates[0].discovery_score == 0.5
+
+
 # --- search (aggregation) ---
 
 
@@ -384,7 +806,7 @@ class TestSearch:
         sample_pypi_response: dict[str, object],
         sample_npm_response: dict[str, object],
     ) -> None:
-        """Mock both PyPI + npm → combined results."""
+        """Mock PyPI + npm + crates.io + Maven → combined results."""
         pypi_resp = httpx.Response(
             200,
             json=sample_pypi_response,
@@ -395,9 +817,17 @@ class TestSearch:
             json=sample_npm_response,
             request=httpx.Request("GET", "https://registry.npmjs.org/-/v1/search"),
         )
+        crates_resp = httpx.Response(
+            404,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+        maven_resp = httpx.Response(
+            404,
+            request=httpx.Request("GET", "https://search.maven.org/solrsearch/select"),
+        )
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.get = AsyncMock(side_effect=[pypi_resp, npm_resp])
+        mock_client.get = AsyncMock(side_effect=[pypi_resp, npm_resp, crates_resp, maven_resp])
 
         channel = RegistryChannel(http_client=mock_client)
         query = DiscoveryQuery(query="flask")
@@ -446,9 +876,17 @@ class TestSearch:
             json=npm_data,
             request=httpx.Request("GET", "https://registry.npmjs.org/-/v1/search"),
         )
+        crates_resp = httpx.Response(
+            404,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+        maven_resp = httpx.Response(
+            404,
+            request=httpx.Request("GET", "https://search.maven.org/solrsearch/select"),
+        )
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.get = AsyncMock(side_effect=[pypi_resp, npm_resp])
+        mock_client.get = AsyncMock(side_effect=[pypi_resp, npm_resp, crates_resp, maven_resp])
 
         channel = RegistryChannel(http_client=mock_client)
         query = DiscoveryQuery(query="my-pkg")
@@ -471,9 +909,17 @@ class TestSearch:
             json=sample_npm_response,
             request=httpx.Request("GET", "https://registry.npmjs.org/-/v1/search"),
         )
+        crates_resp = httpx.Response(
+            404,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+        maven_resp = httpx.Response(
+            404,
+            request=httpx.Request("GET", "https://search.maven.org/solrsearch/select"),
+        )
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.get = AsyncMock(side_effect=[pypi_resp, npm_resp])
+        mock_client.get = AsyncMock(side_effect=[pypi_resp, npm_resp, crates_resp, maven_resp])
 
         channel = RegistryChannel(http_client=mock_client)
         query = DiscoveryQuery(query="flask")
@@ -510,9 +956,17 @@ class TestSearch:
             json=npm_data,
             request=httpx.Request("GET", "https://registry.npmjs.org/-/v1/search"),
         )
+        crates_resp = httpx.Response(
+            404,
+            request=httpx.Request("GET", "https://crates.io/api/v1/crates"),
+        )
+        maven_resp = httpx.Response(
+            404,
+            request=httpx.Request("GET", "https://search.maven.org/solrsearch/select"),
+        )
 
         mock_client = AsyncMock(spec=httpx.AsyncClient)
-        mock_client.get = AsyncMock(side_effect=[pypi_resp, npm_resp])
+        mock_client.get = AsyncMock(side_effect=[pypi_resp, npm_resp, crates_resp, maven_resp])
 
         channel = RegistryChannel(http_client=mock_client)
         query = DiscoveryQuery(query="test", max_candidates=2)

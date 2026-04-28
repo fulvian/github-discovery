@@ -179,6 +179,7 @@ class ScoringEngine:
             gate1_total=gate1_total,
             gate2_total=gate2_total,
             gate3_available=assessment is not None,
+            degraded=assessment.degraded if assessment is not None else None,
         )
 
     async def score_cached(

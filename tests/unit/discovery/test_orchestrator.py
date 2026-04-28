@@ -26,6 +26,7 @@ _BREADTH_BONUS_PER_EXTRA_CHANNEL = 0.1
 _CHANNEL_QUALITY_BONUS_AWESOME_LIST = 0.1
 _CHANNEL_QUALITY_BONUS_CODE_SEARCH = 0.05
 _CHANNEL_QUALITY_BONUS_DEPENDENCY = 0.1
+_RECENCY_BOOST_AMOUNT = 0.05
 
 
 # --- Helpers ---
@@ -700,4 +701,173 @@ async def test_discover_seed_expansion_without_seed_urls(
     assert result.total_candidates == 0
     # expand should NOT be called when there are no seed_urls
     mock_seed.expand.assert_not_called()
+    await pool_manager.close()
+
+
+# --- Test: Recency boost (_calculate_discovery_score) ---
+
+
+def test_recency_boost_applied_to_recent_repos() -> None:
+    """Repo pushed within 30 days gets +0.05 recency boost."""
+    settings = _make_settings()
+    pool_manager = PoolManager(":memory:")
+    orchestrator = DiscoveryOrchestrator(settings, pool_manager)
+
+    channels = {DiscoveryChannel.SEARCH}
+    score = orchestrator._calculate_discovery_score(
+        base_score=0.5,
+        channels=channels,
+        is_recent=True,
+    )
+
+    # 0.5 base + 0.0 breadth + 0.0 quality + 0.05 recency = 0.55
+    expected = 0.5 + _RECENCY_BOOST_AMOUNT
+    assert abs(score - expected) < 1e-9
+
+
+def test_recency_boost_not_applied_to_stale_repos() -> None:
+    """Repo older than 30 days gets no recency boost."""
+    settings = _make_settings()
+    pool_manager = PoolManager(":memory:")
+    orchestrator = DiscoveryOrchestrator(settings, pool_manager)
+
+    channels = {DiscoveryChannel.SEARCH}
+    score = orchestrator._calculate_discovery_score(
+        base_score=0.5,
+        channels=channels,
+        is_recent=False,
+    )
+
+    # 0.5 base + 0.0 breadth + 0.0 quality + 0.0 recency = 0.5
+    expected = 0.5
+    assert abs(score - expected) < 1e-9
+
+
+# --- Test: SeedExpansion with auto_seed (Wave H6) ---
+
+
+@patch("github_discovery.discovery.orchestrator.SeedExpansion")
+@patch("github_discovery.discovery.orchestrator.DependencyChannel")
+@patch("github_discovery.discovery.orchestrator.RegistryChannel")
+@patch("github_discovery.discovery.orchestrator.CuratedChannel")
+@patch("github_discovery.discovery.orchestrator.CodeSearchChannel")
+@patch("github_discovery.discovery.orchestrator.SearchChannel")
+async def test_discover_seed_expansion_auto_seed(
+    mock_search_cls: MagicMock,
+    mock_code_search_cls: MagicMock,
+    mock_curated_cls: MagicMock,
+    mock_registry_cls: MagicMock,
+    mock_dep_cls: MagicMock,
+    mock_seed_cls: MagicMock,
+    settings: Settings,
+    pool_manager: PoolManager,
+) -> None:
+    """SeedExpansion with auto_seed=True and no seed_urls calls expand with auto_seed_query."""
+    candidate = _make_candidate(
+        "org/auto-expanded",
+        score=0.65,
+        channel=DiscoveryChannel.SEED_EXPANSION,
+    )
+
+    mock_seed = mock_seed_cls.return_value
+    mock_seed.expand = AsyncMock(
+        return_value=ChannelResult(
+            channel=DiscoveryChannel.SEED_EXPANSION,
+            candidates=[candidate],
+        ),
+    )
+
+    orchestrator = DiscoveryOrchestrator(settings, pool_manager)
+    query = DiscoveryQuery(
+        query="python static analysis",
+        channels=[DiscoveryChannel.SEED_EXPANSION],
+        seed_urls=None,
+        auto_seed=True,
+    )
+    result = await orchestrator.discover(query)
+
+    assert result.total_candidates == 1
+    mock_seed.expand.assert_awaited_once_with(
+        seed_urls=[],
+        auto_seed_query="python static analysis",
+    )
+    await pool_manager.close()
+
+
+@patch("github_discovery.discovery.orchestrator.SeedExpansion")
+@patch("github_discovery.discovery.orchestrator.DependencyChannel")
+@patch("github_discovery.discovery.orchestrator.RegistryChannel")
+@patch("github_discovery.discovery.orchestrator.CuratedChannel")
+@patch("github_discovery.discovery.orchestrator.CodeSearchChannel")
+@patch("github_discovery.discovery.orchestrator.SearchChannel")
+async def test_discover_seed_expansion_auto_seed_false_no_seeds(
+    mock_search_cls: MagicMock,
+    mock_code_search_cls: MagicMock,
+    mock_curated_cls: MagicMock,
+    mock_registry_cls: MagicMock,
+    mock_dep_cls: MagicMock,
+    mock_seed_cls: MagicMock,
+    settings: Settings,
+    pool_manager: PoolManager,
+) -> None:
+    """SeedExpansion with auto_seed=False and no seed_urls returns empty (no auto-discovery)."""
+    mock_seed = mock_seed_cls.return_value
+
+    orchestrator = DiscoveryOrchestrator(settings, pool_manager)
+    query = DiscoveryQuery(
+        query="test",
+        channels=[DiscoveryChannel.SEED_EXPANSION],
+        seed_urls=None,
+        auto_seed=False,
+    )
+    result = await orchestrator.discover(query)
+
+    assert result.total_candidates == 0
+    mock_seed.expand.assert_not_called()
+    await pool_manager.close()
+
+
+@patch("github_discovery.discovery.orchestrator.SeedExpansion")
+@patch("github_discovery.discovery.orchestrator.DependencyChannel")
+@patch("github_discovery.discovery.orchestrator.RegistryChannel")
+@patch("github_discovery.discovery.orchestrator.CuratedChannel")
+@patch("github_discovery.discovery.orchestrator.CodeSearchChannel")
+@patch("github_discovery.discovery.orchestrator.SearchChannel")
+async def test_discover_seed_expansion_seeds_override_auto_seed(
+    mock_search_cls: MagicMock,
+    mock_code_search_cls: MagicMock,
+    mock_curated_cls: MagicMock,
+    mock_registry_cls: MagicMock,
+    mock_dep_cls: MagicMock,
+    mock_seed_cls: MagicMock,
+    settings: Settings,
+    pool_manager: PoolManager,
+) -> None:
+    """When seed_urls provided, auto_seed flag is ignored — uses explicit seeds."""
+    candidate = _make_candidate(
+        "org/expanded",
+        score=0.65,
+        channel=DiscoveryChannel.SEED_EXPANSION,
+    )
+
+    mock_seed = mock_seed_cls.return_value
+    mock_seed.expand = AsyncMock(
+        return_value=ChannelResult(
+            channel=DiscoveryChannel.SEED_EXPANSION,
+            candidates=[candidate],
+        ),
+    )
+
+    orchestrator = DiscoveryOrchestrator(settings, pool_manager)
+    query = DiscoveryQuery(
+        query="test",
+        channels=[DiscoveryChannel.SEED_EXPANSION],
+        seed_urls=["https://github.com/seed/repo"],
+        auto_seed=True,
+    )
+    result = await orchestrator.discover(query)
+
+    assert result.total_candidates == 1
+    # Called with explicit seed_urls, NOT auto_seed_query
+    mock_seed.expand.assert_awaited_once_with(["https://github.com/seed/repo"])
     await pool_manager.close()

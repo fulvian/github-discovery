@@ -30,7 +30,16 @@ class SubprocessRunner:
     - stdout/stderr capture as strings
     - Return code checking
     - Structured logging
+    - Deduplicated tool-unavailable warnings (TB4)
+
+    TB4: ``_unavailable_tools`` tracks binaries that were not found on the
+    system. The first occurrence logs at WARNING level; subsequent calls for
+    the same tool log at DEBUG level to avoid spamming the log.
     """
+
+    def __init__(self) -> None:
+        """Initialize the runner with an empty unavailable-tools set."""
+        self._unavailable_tools: set[str] = set()
 
     async def run(
         self,
@@ -102,12 +111,25 @@ class SubprocessRunner:
             )
 
         except FileNotFoundError:
-            logger.info(
-                "subprocess_not_found",
-                command=command[0],
-            )
+            tool = command[0]
+            if tool not in self._unavailable_tools:
+                logger.warning(
+                    "tool_unavailable",
+                    tool=tool,
+                    impact=(
+                        f"Tool '{tool}' not found in PATH. "
+                        "Scores for this tool will use heuristic fallback."
+                    ),
+                )
+                self._unavailable_tools.add(tool)
+            else:
+                logger.debug(
+                    "tool_unavailable_repeated",
+                    tool=tool,
+                    note="Already warned — suppressing duplicate warning (TB4)",
+                )
             return SubprocessResult(
                 returncode=-1,
                 stdout="",
-                stderr=f"Command not found: {command[0]}",
+                stderr=f"Command not found: {tool}",
             )

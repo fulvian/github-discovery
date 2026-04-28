@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from github_discovery.discovery.domain_classifier import classify_candidate
 from github_discovery.discovery.types import ChannelResult, DiscoveryQuery
 from github_discovery.models.candidate import RepoCandidate
 from github_discovery.models.enums import DiscoveryChannel
 
 if TYPE_CHECKING:
+    from github_discovery.config import Settings
     from github_discovery.discovery.github_client import GitHubRestClient
 
 logger = structlog.get_logger("github_discovery.discovery.code_search_channel")
@@ -25,7 +27,7 @@ logger = structlog.get_logger("github_discovery.discovery.code_search_channel")
 # --- Constants ---
 
 _CODE_SEARCH_ENDPOINT = "/search/code"
-_MAX_PAGES_CODE_SEARCH = 1  # Code search rate limit: only 10 req/min
+_MAX_PAGES_CODE_SEARCH = 1  # Fallback when settings not available
 _PER_PAGE_CODE_SEARCH = 30  # Lower per_page to stay within rate budget
 _BASE_DISCOVERY_SCORE = 0.5  # Base score for code-search-discovered repos
 _MULTI_SIGNAL_BONUS = 0.1  # Bonus per additional signal category matched
@@ -61,13 +63,27 @@ class CodeSearchChannel:
     Lower popularity bias than Search API — finds by practices, not stars.
     """
 
-    def __init__(self, client: GitHubRestClient) -> None:
-        """Initialize with a GitHub REST client.
+    def __init__(
+        self,
+        client: GitHubRestClient,
+        *,
+        settings: Settings | None = None,
+    ) -> None:
+        """Initialize with a GitHub REST client and optional settings.
 
         Args:
             client: Configured GitHubRestClient for API calls.
+            settings: Application settings for channel-specific config.
         """
         self._client = client
+        self._settings = settings
+
+    @property
+    def _max_pages(self) -> int:
+        """Return the effective max_pages from settings, or fallback constant."""
+        if self._settings is not None:
+            return self._settings.discovery.code_search_max_pages
+        return _MAX_PAGES_CODE_SEARCH
 
     async def search(self, query: DiscoveryQuery) -> ChannelResult:
         """Search for repos using quality signals + query keywords.
@@ -139,7 +155,7 @@ class CodeSearchChannel:
                 items, count = await self._client.search(
                     endpoint=_CODE_SEARCH_ENDPOINT,
                     query=query_str,
-                    max_pages=_MAX_PAGES_CODE_SEARCH,
+                    max_pages=self._max_pages,
                     per_page=_PER_PAGE_CODE_SEARCH,
                 )
             except Exception:
@@ -208,7 +224,7 @@ class CodeSearchChannel:
             items, count = await self._client.search(
                 endpoint=_CODE_SEARCH_ENDPOINT,
                 query=query_str,
-                max_pages=_MAX_PAGES_CODE_SEARCH,
+                max_pages=self._max_pages,
                 per_page=_PER_PAGE_CODE_SEARCH,
             )
             total_count += count
@@ -231,7 +247,7 @@ class CodeSearchChannel:
                 items, count = await self._client.search(
                     endpoint=_CODE_SEARCH_ENDPOINT,
                     query=signal_query,
-                    max_pages=_MAX_PAGES_CODE_SEARCH,
+                    max_pages=self._max_pages,
                     per_page=_PER_PAGE_CODE_SEARCH,
                 )
                 total_count += count
@@ -347,7 +363,7 @@ class CodeSearchChannel:
 
         now = datetime.now(UTC)
 
-        return RepoCandidate(
+        candidate = RepoCandidate(
             full_name=full_name,
             url=html_url,
             html_url=html_url,
@@ -370,6 +386,9 @@ class CodeSearchChannel:
             source_channel=DiscoveryChannel.CODE_SEARCH,
             discovery_score=discovery_score,
         )
+        # TA3: Classify domain for scoring profile selection
+        candidate.domain = classify_candidate(candidate)
+        return candidate
 
     @staticmethod
     def _apply_signal_bonuses(

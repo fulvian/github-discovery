@@ -11,7 +11,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from github_discovery.assessment.repomix_adapter import RepomixAdapter
+from github_discovery.assessment.repomix_adapter import (
+    _SIGNAL_INCLUDE_PATTERNS,
+    RepomixAdapter,
+    _build_config,
+)
 from github_discovery.assessment.types import RepoContent
 from github_discovery.exceptions import AssessmentError
 
@@ -233,12 +237,11 @@ class TestTruncateContent:
 
 
 class TestBuildConfig:
-    """Tests for RepomixAdapter._build_config."""
+    """Tests for repomix_adapter._build_config (module-level function)."""
 
     def test_compression_enabled(self) -> None:
         """_build_config with compression=True sets compression flags."""
-        adapter = RepomixAdapter(max_tokens=10_000, compression=True)
-        config = adapter._build_config()
+        config = _build_config(compression=True)
 
         assert config.compression.enabled is True
         assert config.compression.keep_signatures is True
@@ -247,15 +250,20 @@ class TestBuildConfig:
 
     def test_compression_disabled(self) -> None:
         """_build_config with compression=False does not enable compression."""
-        adapter = RepomixAdapter(max_tokens=10_000, compression=False)
-        config = adapter._build_config()
+        config = _build_config(compression=False)
 
         assert config.compression.enabled is False
 
     def test_config_sets_token_counting(self) -> None:
         """_build_config enables token counting."""
-        adapter = RepomixAdapter()
-        config = adapter._build_config()
+        config = _build_config()
 
         assert config.output.calculate_tokens is True
         assert config.token_count.encoding == "o200k_base"
+
+    def test_signal_patterns_included(self) -> None:
+        """_build_config includes signal file patterns for CI/docs/security."""
+        config = _build_config(include_patterns=_SIGNAL_INCLUDE_PATTERNS)
+
+        for pattern in _SIGNAL_INCLUDE_PATTERNS:
+            assert pattern in config.include, f"Pattern {pattern!r} not in include list"

@@ -111,6 +111,16 @@ The MCP tool `deep_assess` performs hard gate screening before Gate 3 assessment
 - Retry/backoff is enforced in the REST client for retryable classes (rate limit + 5xx)
 - Gate 2 startup performs orphan clone cleanup (`cleanup_orphan_clones`) to reduce temp-dir leaks after interrupted runs
 
+## ScoreResult.degraded Flag (Production Readiness v1)
+
+`ScoreResult.degraded: bool | None` signals when Gate 3 scores may be unreliable:
+
+- Set to `True` when `ContentTruncationHeuristic` detects truncation via content similarity drop
+- Set to `None` when no deep assessment was performed (Gate 3 not reached)
+- Set to `False` when full content was available and assessment was complete
+- Surface in CLI `rank` command `degraded` column — analysts can filter or weight results accordingly
+- Produced by `ScoringEngine.score()` from `assessment.degraded` field
+
 ## See Also
 
 - [Tiered Pipeline](../architecture/tiered-pipeline.md)

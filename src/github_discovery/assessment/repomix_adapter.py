@@ -49,7 +49,13 @@ class RepomixAdapter:
         self._compression = compression
         self._timeout = timeout_seconds
 
-    async def pack(self, repo_url: str, full_name: str) -> RepoContent:
+    async def pack(
+        self,
+        repo_url: str,
+        full_name: str,
+        *,
+        max_tokens_override: int | None = None,
+    ) -> RepoContent:
         """Pack a repository into LLM-friendly content.
 
         Uses python-repomix RepoProcessor with:
@@ -60,6 +66,9 @@ class RepomixAdapter:
         Args:
             repo_url: GitHub clone URL.
             full_name: Repository full name for context.
+            max_tokens_override: Override the instance-level max_tokens for this
+                specific call. Useful for adaptive content strategies that
+                vary the token budget per-repo based on size tier.
 
         Returns:
             RepoContent with packed content and metadata.
@@ -67,10 +76,21 @@ class RepomixAdapter:
         Raises:
             AssessmentError: If packing fails.
         """
-        log = logger.bind(repo_url=repo_url, full_name=full_name)
-        log.info("packing_repo", max_tokens=self._max_tokens, compression=self._compression)
+        effective_max_tokens = (
+            max_tokens_override if max_tokens_override is not None else self._max_tokens
+        )
+        log = logger.bind(
+            repo_url=repo_url,
+            full_name=full_name,
+            max_tokens=effective_max_tokens,
+            compression=self._compression,
+        )
+        log.info("packing_repo")
 
-        config = self._build_config()
+        config = _build_config(
+            include_patterns=_SIGNAL_INCLUDE_PATTERNS,
+            compression=self._compression,
+        )
 
         try:
             processor = RepoProcessor(repo_url=repo_url, config=config)
@@ -108,7 +128,7 @@ class RepomixAdapter:
 
         truncated_content, was_truncated = self._truncate_content(
             raw_content,
-            self._max_tokens,
+            effective_max_tokens,
         )
 
         if was_truncated:
@@ -155,19 +175,79 @@ class RepomixAdapter:
         truncated = content[:max_chars]
         return truncated, True
 
-    def _build_config(self) -> RepomixConfig:
-        """Build RepomixConfig with compression and token counting."""
-        config = RepomixConfig()
+    # Signal file patterns — always include these even in huge/truncated packs.
 
-        # Token counting
-        config.output.calculate_tokens = True
-        config.token_count.encoding = "o200k_base"
 
-        # Interface-mode compression
-        if self._compression:
-            config.compression.enabled = True
-            config.compression.keep_signatures = True
-            config.compression.keep_docstrings = True
-            config.compression.keep_interfaces = True
+# These files are critical for heuristic scoring (CI, docs, security).
+_SIGNAL_INCLUDE_PATTERNS: tuple[str, ...] = (
+    # CI/CD workflows — critical for testing/architecture scoring
+    ".github/workflows/*.yml",
+    ".github/workflows/*.yaml",
+    "Jenkinsfile",
+    ".gitlab-ci.yml",
+    ".circleci/config.yml",
+    "azure-pipelines.yml",
+    # Security & dependency management
+    "SECURITY.md",
+    "renovate.json",
+    "dependabot.yml",
+    ".github/dependabot.yml",
+    ".snyk",
+    # Documentation
+    "README.md",
+    "README.rst",
+    "README.txt",
+    "CONTRIBUTING.md",
+    "CONTRIBUTING.rst",
+    "CHANGELOG.md",
+    "CHANGELOG.rst",
+    "LICENSE",
+    "LICENSE.txt",
+    "docs/**/*.md",
+    "docs/**/*.rst",
+    # Config for testing
+    "pytest.ini",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "tox.ini",
+    ".mocharc*",
+    "jest.config.*",
+    "vitest.config.*",
+    "tsconfig*.json",
+)
 
-        return config
+
+def _build_config(
+    *,
+    include_patterns: tuple[str, ...] | None = None,
+    compression: bool = True,
+) -> RepomixConfig:
+    """Build RepomixConfig with signal file inclusion, compression, and token counting.
+
+    Args:
+        include_patterns: Additional glob patterns to always include.
+        compression: Whether to enable interface-mode compression.
+
+    Returns:
+        Configured RepomixConfig.
+    """
+    config = RepomixConfig()
+
+    # Token counting
+    config.output.calculate_tokens = True
+    config.token_count.encoding = "o200k_base"
+
+    # Signal file inclusion — ensures CI, docs, security files are always packed
+    patterns_to_include = list(include_patterns) if include_patterns else []
+    if patterns_to_include:
+        config.include.extend(patterns_to_include)
+
+    # Interface-mode compression
+    if compression:
+        config.compression.enabled = True
+        config.compression.keep_signatures = True
+        config.compression.keep_docstrings = True
+        config.compression.keep_interfaces = True
+
+    return config

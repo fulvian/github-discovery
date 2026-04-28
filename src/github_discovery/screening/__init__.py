@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from github_discovery.screening.ci_cd import CiCdDetector
 from github_discovery.screening.complexity import ComplexityAnalyzer
+from github_discovery.screening.constants import FALLBACK_CONFIDENCE, FALLBACK_VALUE
 from github_discovery.screening.dependency_quality import DependencyQualityScorer
 from github_discovery.screening.gate1_metadata import Gate1MetadataScreener
 from github_discovery.screening.gate2_static import Gate2StaticScreener
@@ -25,6 +26,8 @@ from github_discovery.screening.test_footprint import TestFootprintAnalyzer
 from github_discovery.screening.types import RepoContext, ScreeningContext, SubprocessResult
 
 __all__ = [
+    "FALLBACK_CONFIDENCE",
+    "FALLBACK_VALUE",
     "CiCdDetector",
     "ComplexityAnalyzer",
     "DependencyQualityScorer",

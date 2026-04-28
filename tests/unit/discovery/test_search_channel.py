@@ -11,11 +11,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from github_discovery.config import GitHubSettings
+from github_discovery.config import DiscoverySettings, GitHubSettings, Settings
 from github_discovery.discovery.github_client import GitHubRestClient
 from github_discovery.discovery.search_channel import SearchChannel
 from github_discovery.discovery.types import ChannelResult, DiscoveryQuery
-from github_discovery.models.enums import DiscoveryChannel
+from github_discovery.models.enums import DiscoveryChannel, DomainType
 
 # --- Fixtures ---
 
@@ -109,6 +109,41 @@ class TestBuildQuery:
         result = search_channel.build_query(query)
 
         assert "is:public" in result
+
+    def test_build_query_uses_domain_aware_activity_threshold(
+        self,
+        search_channel: SearchChannel,
+    ) -> None:
+        """LANG_TOOL domain hint uses 365d activity threshold (not 180d)."""
+        query = DiscoveryQuery(query="python", domain_hint=DomainType.LANG_TOOL)
+        result = search_channel.build_query(query)
+
+        pushed_parts = [p for p in result.split() if p.startswith("pushed:>")]
+        assert len(pushed_parts) == 1
+        date_str = pushed_parts[0].split(">")[1]
+        cutoff_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=UTC)
+        expected_cutoff = datetime.now(UTC) - timedelta(days=365)
+        assert abs((cutoff_date - expected_cutoff).total_seconds()) <= 172800
+
+    def test_build_query_config_override_highest_priority(
+        self,
+        rest_client: GitHubRestClient,
+    ) -> None:
+        """Config activity_days override takes priority over domain hint."""
+        settings = Settings(
+            github=GitHubSettings(token="test_token"),  # noqa: S106
+            discovery=DiscoverySettings(activity_days=60),
+        )
+        channel = SearchChannel(rest_client, settings=settings)
+        query = DiscoveryQuery(query="python", domain_hint=DomainType.LANG_TOOL)
+        result = channel.build_query(query)
+
+        pushed_parts = [p for p in result.split() if p.startswith("pushed:>")]
+        assert len(pushed_parts) == 1
+        date_str = pushed_parts[0].split(">")[1]
+        cutoff_date = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=UTC)
+        expected_cutoff = datetime.now(UTC) - timedelta(days=60)
+        assert abs((cutoff_date - expected_cutoff).total_seconds()) <= 172800
 
 
 # --- search tests ---

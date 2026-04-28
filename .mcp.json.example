@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "github-discovery": {
+      "command": "uvx",
+      "args": ["github-discovery", "mcp", "serve", "--transport", "stdio"],
+      "env": {
+        "GHDISC_GITHUB_TOKEN": "${GITHUB_TOKEN}",
+        "GHDISC_ASSESSMENT_NANOGPT_API_KEY": "${NANOGPT_API_KEY}",
+        "GHDISC_SESSION_BACKEND": "sqlite"
+      }
+    }
+  }
+}

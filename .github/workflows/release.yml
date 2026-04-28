@@ -1,0 +1,113 @@
+# GitHub Discovery — PyPI + Docker Release Pipeline
+# Triggered by tags matching v*.*.*
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  # ------------------------------------------------------------------
+  # Quality gate — must pass before release
+  # ------------------------------------------------------------------
+  quality:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --frozen --dev
+      - name: Lint
+        run: uv run ruff check src/ tests/
+      - name: Type check
+        run: uv run mypy src/ --strict
+      - name: Test (unit + invariants)
+        run: uv run pytest tests/ -m "not integration and not slow" --tb=short -q
+      - name: Golden smoke test
+        run: uv run pytest tests/invariants/ -m invariant -v --tb=short -q
+
+  # ------------------------------------------------------------------
+  # PyPI build & publish (Trusted Publisher via OIDC)
+  # ------------------------------------------------------------------
+  pypi:
+    name: PyPI Release
+    needs: [quality]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write  # Required for PyPI trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Build
+        run: uv build
+      - name: Check package
+        run: uv run twine check dist/*
+      - name: Publish to TestPyPI (dry-run)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ------------------------------------------------------------------
+  # Docker image build & publish to GHCR
+  # ------------------------------------------------------------------
+  docker:
+    name: Docker Image
+    needs: [quality]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract version from tag
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ------------------------------------------------------------------
+  # Smoke test — verify UVX install in clean container
+  # ------------------------------------------------------------------
+  smoke:
+    name: UVX Smoke Test
+    needs: [pypi]
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.13-slim
+    steps:
+      - name: Install uv
+        run: pip install uv
+      - name: Test uvx install
+        run: |
+          uvx --from github-discovery==${{ github.ref_name }} ghdisc version

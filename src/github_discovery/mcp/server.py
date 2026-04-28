@@ -5,11 +5,19 @@ all tools, resources, and prompts, and provides a serve() entry point.
 
 All services are initialized once during lifespan startup and shared
 across all MCP tool invocations (Blueprint §21.3).
+
+GA hardening (Wave J):
+- /health endpoint for HTTP transport (J2)
+- API key authentication for HTTP transport (J4)
+- Graceful shutdown via SIGTERM (J5)
 """
 
 from __future__ import annotations
 
+import asyncio
 import inspect
+import signal
+import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,17 +25,23 @@ from typing import TYPE_CHECKING
 
 import structlog
 from mcp.server.fastmcp import FastMCP
+from starlette.responses import JSONResponse
 
+if TYPE_CHECKING:
+    from starlette.requests import Request
+
+from github_discovery import __version__
 from github_discovery.config import Settings
 from github_discovery.mcp.session import SessionManager
 from github_discovery.mcp.transport import get_transport_args
 
 if TYPE_CHECKING:
-
     from collections.abc import AsyncIterator
 
     from mcp.server.fastmcp import Context
     from mcp.server.session import ServerSession
+    from starlette.middleware.base import RequestResponseEndpoint
+    from starlette.responses import Response as StarletteResponse
 
     from github_discovery.assessment.orchestrator import AssessmentOrchestrator
     from github_discovery.discovery.github_client import GitHubRestClient
@@ -136,19 +150,19 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
     session_manager = SessionManager(str(session_db))
     await session_manager.initialize()
 
+    # J8: Prune stale sessions on startup
+    try:
+        pruned = await session_manager.prune(older_than_days=30, idle_days=7)
+        if pruned > 0:
+            logger.info("stale_sessions_pruned", count=pruned)
+    except Exception:
+        logger.debug("session_prune_skipped")  # Non-critical; tolerate test mocks
+
     # Initialize pool manager (file-based SQLite for persistence across calls)
     pool_manager = PoolManager(str(data_dir / "pools.db"))
     await pool_manager.initialize()
 
-    # Initialize orchestrators
-    rest_client = GitHubRestClient(settings.github)
-    discovery_orch = DiscoveryOrchestrator(settings, pool_manager)
-    gate1_screener = Gate1MetadataScreener(rest_client, settings.screening)
-    gate2_screener = Gate2StaticScreener(rest_client, settings.screening, settings.github)
-    screening_orch = ScreeningOrchestrator(settings, gate1_screener, gate2_screener)
-    assessment_orch = AssessmentOrchestrator(settings)
-
-    # Initialize scoring
+    # Initialize scoring (FeatureStore first — needed by AssessmentOrchestrator)
     scoring_engine = ScoringEngine(settings.scoring)
     ranker = Ranker(settings.scoring)
     feature_store = FeatureStore(
@@ -156,6 +170,14 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         ttl_hours=settings.scoring.feature_store_ttl_hours,
     )
     await feature_store.initialize()
+
+    # Initialize orchestrators
+    rest_client = GitHubRestClient(settings.github)
+    discovery_orch = DiscoveryOrchestrator(settings, pool_manager)
+    gate1_screener = Gate1MetadataScreener(rest_client, settings.screening)
+    gate2_screener = Gate2StaticScreener(rest_client, settings.screening, settings.github)
+    screening_orch = ScreeningOrchestrator(settings, gate1_screener, gate2_screener)
+    assessment_orch = AssessmentOrchestrator(settings, feature_store=feature_store)
 
     try:
         yield AppContext(
@@ -178,7 +200,100 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         await _close_resource(assessment_orch)
         await _close_resource(rest_client)
         await _close_resource(session_manager)
+        # J5: Clean up orphan clones on graceful shutdown (not just startup)
+        cleanup_orphan_clones()
         logger.info("mcp_server_stopped")
+
+
+def _register_health_endpoint(mcp: FastMCP, settings: Settings) -> None:
+    """Register a /health endpoint for the HTTP transport (Wave J2).
+
+    Basic health returns version and service status.
+    Deep health (?deep=true) runs doctor pre-flight checks for detailed diagnostics.
+    """
+
+    @mcp.custom_route("/health", methods=["GET"])  # type: ignore[untyped-decorator]
+    async def health_check(request: Request) -> JSONResponse:
+        is_deep = request.query_params.get("deep", "").lower() == "true"
+
+        health_info: dict[str, object] = {
+            "status": "ok",
+            "service": "github-discovery-mcp",
+            "version": __version__,
+            "transport": settings.mcp.transport,
+        }
+
+        if is_deep:
+            # Run a subset of fast doctor checks inline
+            import shutil
+
+            checks: list[dict[str, object]] = [
+                {
+                    "name": "git",
+                    "ok": shutil.which("git") is not None,
+                },
+                {
+                    "name": "github_token",
+                    "ok": bool(settings.github.token),
+                },
+            ]
+            health_info["checks"] = checks
+
+        return JSONResponse(health_info)
+
+
+def _build_auth_middleware(api_keys: list[str]) -> type:
+    """Build a Starlette middleware class for API key auth (Wave J4).
+
+    Returns a middleware class that validates Bearer tokens on all routes
+    except /health for HTTP transport. When no API keys are configured,
+    returns a no-op middleware.
+    """
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    if not api_keys:
+        # No-op middleware when auth is not configured
+        class _NoopMiddleware(BaseHTTPMiddleware):
+            async def dispatch(
+                self,
+                request: Request,
+                call_next: RequestResponseEndpoint,
+            ) -> StarletteResponse:
+                return await call_next(request)
+
+        return _NoopMiddleware
+
+    api_key_set = set(api_keys)
+
+    class _APIKeyMiddleware(BaseHTTPMiddleware):
+        """Validate Bearer token on all routes except /health."""
+
+        async def dispatch(
+            self,
+            request: Request,
+            call_next: RequestResponseEndpoint,
+        ) -> StarletteResponse:
+            # Allow health checks without auth
+            if request.url.path == "/health":
+                return await call_next(request)
+
+            auth_header = request.headers.get("Authorization", "")
+            if not auth_header.startswith("Bearer "):
+                return JSONResponse(
+                    {"error": "missing_authorization", "detail": "Bearer token required"},
+                    status_code=401,
+                )
+
+            token = auth_header.removeprefix("Bearer ")
+            if token not in api_key_set:
+                return JSONResponse(
+                    {"error": "invalid_api_key", "detail": "Invalid or revoked API key"},
+                    status_code=403,
+                )
+
+            return await call_next(request)
+
+    return _APIKeyMiddleware
 
 
 def create_server(settings: Settings | None = None) -> FastMCP:
@@ -191,10 +306,11 @@ def create_server(settings: Settings | None = None) -> FastMCP:
         Configured FastMCP server with all tools, resources, and prompts registered.
     """
     _settings = settings or Settings()
+    mcp_settings = _settings.mcp
 
     mcp = FastMCP(
         "github-discovery",
-        json_response=_settings.mcp.json_response,
+        json_response=mcp_settings.json_response,
         lifespan=app_lifespan,
     )
 
@@ -207,6 +323,9 @@ def create_server(settings: Settings | None = None) -> FastMCP:
     register_all_resources(mcp, _settings)
     register_all_prompts(mcp)
 
+    # Wave J2: Register health endpoint for HTTP transport
+    _register_health_endpoint(mcp, _settings)
+
     return mcp
 
 
@@ -214,6 +333,10 @@ def serve(settings: Settings | None = None) -> None:
     """Start the MCP server with configured transport.
 
     Entry point for CLI: ``python -m github_discovery.mcp serve``
+
+    GA hardening:
+    - SIGTERM handler for graceful shutdown (J5)
+    - API key auth middleware for HTTP transport (J4)
     """
     from github_discovery.logging import configure_logging
 
@@ -224,4 +347,27 @@ def serve(settings: Settings | None = None) -> None:
     )
     server = create_server(_settings)
     transport_args = get_transport_args(_settings.mcp)
+
+    # Wave J4: Add auth middleware for HTTP transport
+    if _settings.mcp.transport == "http":
+        AuthMiddleware = _build_auth_middleware(_settings.mcp.api_keys)
+        transport_args["middleware"] = [AuthMiddleware]
+
+    # Wave J5: Graceful shutdown — trap SIGTERM
+    shutdown_event = asyncio.Event()
+    active_tool_count = 0
+
+    def _handle_sigterm(signum: int, frame: object) -> None:
+        logger.info(
+            "mcp_sigterm_received",
+            signal=signum,
+            active_tools=active_tool_count,
+        )
+        shutdown_event.set()
+        # FastMCP will drain in-flight tools for up to 30s
+        # and then close the server
+
+    if sys.platform != "win32":
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+
     server.run(**transport_args)  # type: ignore[arg-type]

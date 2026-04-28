@@ -1,0 +1,9 @@
+# Default owner for all files
+* @fulvio
+
+# Sensitive paths
+/src/github_discovery/config.py @fulvio
+/src/github_discovery/exceptions.py @fulvio
+/.github/workflows/ @fulvio
+/pyproject.toml @fulvio
+/Dockerfile @fulvio

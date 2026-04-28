@@ -71,6 +71,15 @@ class DomainProfile(BaseModel):
         default_factory=list,
         description="Discovery channels preferred for this domain",
     )
+    activity_threshold_days: int = Field(
+        default=180,
+        description=(
+            "Inactivity threshold in days for this domain. "
+            "Repos with no push activity beyond this limit are excluded "
+            "from search results. Domain-specific: SECURITY_TOOL=90, "
+            "LANG_TOOL=365, default=180. (Wave H1)"
+        ),
+    )
 
     def validate_weights(self) -> bool:
         """Check that dimension weights sum to approximately 1.0."""
@@ -123,6 +132,14 @@ class ScoreResult(BaseModel):
     gate3_available: bool = Field(
         default=False,
         description="Whether Gate 3 deep assessment was performed",
+    )
+    degraded: bool | None = Field(
+        default=None,
+        description=(
+            "Whether Gate 3 assessment used heuristic fallbacks for any dimension "
+            "(indicates degraded quality due to LLM failures or content truncation). "
+            "None if no deep assessment was performed."
+        ),
     )
 
     coverage: float = Field(

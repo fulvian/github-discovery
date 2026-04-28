@@ -61,7 +61,7 @@ class TestMetadataScreenResult:
         assert result.gate1_total == 0.0
 
     def test_compute_total_uniform_weights(self) -> None:
-        """Compute total averages scores with uniform weights."""
+        """Compute total averages scores with uniform weights (confidence-aware)."""
         result = MetadataScreenResult(
             full_name="test/repo",
             hygiene=HygieneScore(value=0.8),
@@ -72,11 +72,49 @@ class TestMetadataScreenResult:
             ci_cd=CiCdScore(value=0.4),
             dependency_quality=DependencyQualityScore(value=0.6),
         )
-        total = result.compute_total()
+        total, coverage = result.compute_total()
         assert 0.0 <= total <= 1.0
-        # With uniform weights (1.0 each), total should be average
+        assert coverage == 1.0  # All have confidence=1.0 by default
+        # With uniform weights (1.0 each), raw average should be average
         expected_avg = (0.8 + 0.6 + 0.7 + 0.5 + 0.9 + 0.4 + 0.6) / 7
+        # Damped = raw * (0.5 + 0.5 * coverage) = raw * 1.0 = raw
         assert abs(total - expected_avg) < 0.01
+
+    def test_compute_total_excludes_zero_confidence(self) -> None:
+        """Sub-scores with confidence=0 are excluded from composite."""
+        result = MetadataScreenResult(
+            full_name="test/repo",
+            hygiene=HygieneScore(value=0.8, confidence=1.0),
+            maintenance=MaintenanceScore(value=0.0, confidence=0.0),  # Fallback
+            release_discipline=ReleaseDisciplineScore(value=0.7, confidence=1.0),
+            review_practice=ReviewPracticeScore(value=0.5, confidence=1.0),
+            test_footprint=FootprintScore(value=0.9, confidence=1.0),
+            ci_cd=CiCdScore(value=0.4, confidence=1.0),
+            dependency_quality=DependencyQualityScore(value=0.6, confidence=1.0),
+        )
+        total, coverage = result.compute_total()
+        # coverage = 6/7 (one score excluded), raw = avg of 6 scores
+        expected_raw = (0.8 + 0.7 + 0.5 + 0.9 + 0.4 + 0.6) / 6
+        expected_cov = 6.0 / 7.0
+        expected_damped = expected_raw * (0.5 + 0.5 * expected_cov)
+        assert abs(coverage - expected_cov) < 0.01
+        assert abs(total - expected_damped) < 0.01
+
+    def test_compute_total_all_fallback(self) -> None:
+        """All confidence=0 → composite=0.0, coverage=0.0."""
+        result = MetadataScreenResult(
+            full_name="test/repo",
+            hygiene=HygieneScore(value=0.8, confidence=0.0),
+            maintenance=MaintenanceScore(value=0.6, confidence=0.0),
+            release_discipline=ReleaseDisciplineScore(value=0.7, confidence=0.0),
+            review_practice=ReviewPracticeScore(value=0.5, confidence=0.0),
+            test_footprint=FootprintScore(value=0.9, confidence=0.0),
+            ci_cd=CiCdScore(value=0.4, confidence=0.0),
+            dependency_quality=DependencyQualityScore(value=0.6, confidence=0.0),
+        )
+        total, coverage = result.compute_total()
+        assert total == 0.0
+        assert coverage == 0.0
 
     def test_pass_with_high_scores(self) -> None:
         """Result passes with high scores above threshold."""
@@ -125,7 +163,7 @@ class TestStaticScreenResult:
         assert result.gate2_total == 0.0
 
     def test_compute_total(self) -> None:
-        """Compute total averages Gate 2 scores."""
+        """Compute total averages Gate 2 scores (confidence-aware)."""
         result = StaticScreenResult(
             full_name="test/repo",
             security_hygiene=SecurityHygieneScore(value=0.8),
@@ -133,9 +171,27 @@ class TestStaticScreenResult:
             complexity=ComplexityScore(value=0.6),
             secret_hygiene=SecretHygieneScore(value=1.0),
         )
-        total = result.compute_total()
+        total, coverage = result.compute_total()
         expected = (0.8 + 0.9 + 0.6 + 1.0) / 4
         assert abs(total - expected) < 0.01
+        assert coverage == 1.0
+
+    def test_compute_total_excludes_zero_confidence(self) -> None:
+        """Sub-scores with confidence=0 are excluded (Gate 2 resilience)."""
+        result = StaticScreenResult(
+            full_name="test/repo",
+            security_hygiene=SecurityHygieneScore(value=0.8, confidence=1.0),
+            vulnerability=VulnerabilityScore(value=0.0, confidence=0.0),  # OSV failed
+            complexity=ComplexityScore(value=0.6, confidence=1.0),
+            secret_hygiene=SecretHygieneScore(value=0.5, confidence=0.0),  # gitleaks missing
+        )
+        total, coverage = result.compute_total()
+        # 2 out of 4 excluded, coverage=2/4=0.5
+        expected_cov = 0.5
+        expected_raw = (0.8 + 0.6) / 2
+        expected_damped = expected_raw * (0.5 + 0.5 * expected_cov)
+        assert abs(coverage - expected_cov) < 0.01
+        assert abs(total - expected_damped) < 0.01
 
     def test_tools_tracking(self) -> None:
         """Result tracks which tools were used and which failed."""

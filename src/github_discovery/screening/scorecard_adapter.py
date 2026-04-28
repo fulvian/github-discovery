@@ -12,6 +12,7 @@ import structlog
 
 from github_discovery.models.candidate import RepoCandidate  # noqa: TC001
 from github_discovery.models.screening import SecurityHygieneScore
+from github_discovery.screening.constants import FALLBACK_CONFIDENCE, FALLBACK_VALUE
 
 logger = structlog.get_logger("github_discovery.screening.scorecard")
 
@@ -19,7 +20,6 @@ _SCORECARD_API_BASE = "https://api.scorecard.dev"
 _SCORECARD_ENDPOINT = "/projects/github.com/{owner}/{repo}"
 _SCORECARD_TIMEOUT = 30.0
 _HTTP_NOT_FOUND = 404
-_FALLBACK_SCORE = 0.3  # Align with gate2_static._FALLBACK_SCORE — no data ≠ neutral
 
 
 class ScorecardAdapter:
@@ -51,8 +51,8 @@ class ScorecardAdapter:
             if response.status_code == _HTTP_NOT_FOUND:
                 logger.info("scorecard_not_scored", repo=candidate.full_name)
                 return SecurityHygieneScore(
-                    value=_FALLBACK_SCORE,
-                    confidence=0.0,
+                    value=FALLBACK_VALUE,
+                    confidence=FALLBACK_CONFIDENCE,
                     notes=["Scorecard: repo not scored"],
                 )
 
@@ -82,15 +82,15 @@ class ScorecardAdapter:
         except httpx.TimeoutException:
             logger.warning("scorecard_timeout", repo=candidate.full_name)
             return SecurityHygieneScore(
-                value=_FALLBACK_SCORE,
-                confidence=0.0,
+                value=FALLBACK_VALUE,
+                confidence=FALLBACK_CONFIDENCE,
                 notes=["Scorecard: request timed out"],
             )
         except Exception as e:
             logger.warning("scorecard_error", repo=candidate.full_name, error=str(e))
             return SecurityHygieneScore(
-                value=_FALLBACK_SCORE,
-                confidence=0.0,
+                value=FALLBACK_VALUE,
+                confidence=FALLBACK_CONFIDENCE,
                 notes=[f"Scorecard: {e}"],
             )
 

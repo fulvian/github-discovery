@@ -1,9 +1,9 @@
 """Package registry mapping discovery channel.
 
-Queries PyPI and npm registries for packages matching the query,
-maps to their GitHub repository URLs, and produces RepoCandidate
-objects. This channel does NOT depend on the GitHub API — it uses
-external registry APIs directly via httpx.
+Queries PyPI, npm, crates.io, and Maven Central registries for packages
+matching the query, maps to their GitHub repository URLs, and produces
+RepoCandidate objects. This channel does NOT depend on the GitHub API —
+it uses external registry APIs directly via httpx.
 
 Registry sources provide a different signal than GitHub search:
 they reveal packages that people publish, which implies active
@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 import httpx
 import structlog
 
+from github_discovery.discovery.domain_classifier import classify_candidate
 from github_discovery.discovery.types import ChannelResult, DiscoveryQuery
 from github_discovery.models.candidate import RepoCandidate
 from github_discovery.models.enums import DiscoveryChannel
@@ -32,9 +33,14 @@ logger = structlog.get_logger("github_discovery.discovery.registry_channel")
 
 _PYPI_JSON_API = "https://pypi.org/pypi/{package}/json"
 _NPM_SEARCH_API = "https://registry.npmjs.org/-/v1/search"
+_CRATES_IO_SEARCH_API = "https://crates.io/api/v1/crates"
+_MAVEN_SEARCH_API = "https://search.maven.org/solrsearch/select"
 _REGISTRY_DISCOVERY_SCORE = 0.55  # Registry-sourced packages — published, implies some quality
 _NPM_DEFAULT_SIZE = 50
+_CRATES_IO_DISCOVERY_SCORE = 0.5
+_MAVEN_DISCOVERY_SCORE = 0.5
 _GITHUB_HOST = "github.com"
+_CRATES_IO_USER_AGENT = "github-discovery/0.3.0-beta"
 
 # PyPI project URL keys that might contain a GitHub URL, in priority order.
 _PYPI_URL_KEYS = (
@@ -113,8 +119,8 @@ def _extract_github_url(url: str | None) -> str | None:
 class RegistryChannel:
     """Package registry mapping discovery channel.
 
-    Queries PyPI/npm for packages matching the query,
-    maps to their GitHub repository URLs.
+    Queries PyPI, npm, crates.io, and Maven Central for packages matching
+    the query, maps to their GitHub repository URLs.
     """
 
     def __init__(self, http_client: httpx.AsyncClient | None = None) -> None:
@@ -290,12 +296,173 @@ class RegistryChannel:
             elapsed_seconds=elapsed,
         )
 
+    async def search_crates_io(
+        self,
+        query: str,
+        *,
+        max_results: int = 50,
+    ) -> ChannelResult:
+        """Search crates.io packages and map to GitHub repos.
+
+        Uses the crates.io API to find Rust packages matching the query,
+        then filters to those with GitHub repository URLs.
+
+        Args:
+            query: Search term for crates.io.
+            max_results: Maximum results to request from crates.io API.
+
+        Returns:
+            ChannelResult with candidates that have GitHub URLs.
+        """
+        start_time = time.monotonic()
+
+        params: dict[str, str | int] = {
+            "q": query,
+            "per_page": max_results,
+            "sort": "recent-updates",
+        }
+        headers = {"User-Agent": _CRATES_IO_USER_AGENT}
+
+        try:
+            response = await self._client.get(
+                _CRATES_IO_SEARCH_API,
+                params=params,
+                headers=headers,
+            )
+
+            if response.status_code != _HTTP_OK:
+                logger.debug(
+                    "registry_crates_io_error",
+                    query=query,
+                    status=response.status_code,
+                )
+                return self._empty_result(elapsed=time.monotonic() - start_time)
+
+            data = response.json()
+        except Exception as e:
+            logger.warning(
+                "registry_crates_io_error",
+                query=query,
+                error_type=type(e).__name__,
+                error=str(e),
+            )
+            return self._empty_result(elapsed=time.monotonic() - start_time)
+
+        crates = data.get("crates", [])
+        total = data.get("meta", {}).get("total", len(crates))
+        candidates: list[RepoCandidate] = []
+
+        for crate_data in crates:
+            crate = crate_data.get("crate", crate_data)
+            github_url = self._extract_github_from_crates(crate)
+            if github_url:
+                description = crate.get("description") or ""
+                candidate = self._url_to_candidate(github_url, description=description)
+                candidate.discovery_score = _CRATES_IO_DISCOVERY_SCORE
+                candidates.append(candidate)
+
+        elapsed = time.monotonic() - start_time
+        logger.info(
+            "registry_crates_io_found",
+            query=query,
+            crates_results=len(crates),
+            github_mapped=len(candidates),
+            elapsed_seconds=round(elapsed, 3),
+        )
+
+        return ChannelResult(
+            channel=DiscoveryChannel.REGISTRY,
+            candidates=candidates[:max_results],
+            total_found=total,
+            has_more=total > len(candidates),
+            elapsed_seconds=elapsed,
+        )
+
+    async def search_maven(
+        self,
+        query: str,
+        *,
+        max_results: int = 50,
+    ) -> ChannelResult:
+        """Search Maven Central and map to GitHub repos.
+
+        Uses the Maven Central Solr search API to find Java/JVM packages
+        matching the query, then filters to those with GitHub repository URLs.
+
+        Args:
+            query: Search term for Maven Central.
+            max_results: Maximum results to request from Maven API.
+
+        Returns:
+            ChannelResult with candidates that have GitHub URLs.
+        """
+        start_time = time.monotonic()
+
+        params: dict[str, str | int] = {
+            "q": query,
+            "rows": max_results,
+            "wt": "json",
+        }
+
+        try:
+            response = await self._client.get(
+                _MAVEN_SEARCH_API,
+                params=params,
+            )
+
+            if response.status_code != _HTTP_OK:
+                logger.debug(
+                    "registry_maven_error",
+                    query=query,
+                    status=response.status_code,
+                )
+                return self._empty_result(elapsed=time.monotonic() - start_time)
+
+            data = response.json()
+        except Exception as e:
+            logger.warning(
+                "registry_maven_error",
+                query=query,
+                error_type=type(e).__name__,
+                error=str(e),
+            )
+            return self._empty_result(elapsed=time.monotonic() - start_time)
+
+        docs = data.get("response", {}).get("docs", [])
+        total = data.get("response", {}).get("numFound", len(docs))
+        candidates: list[RepoCandidate] = []
+
+        for doc in docs:
+            github_url = self._extract_github_from_maven(doc)
+            if github_url:
+                description = doc.get("id", "")
+                candidate = self._url_to_candidate(github_url, description=description)
+                candidate.discovery_score = _MAVEN_DISCOVERY_SCORE
+                candidates.append(candidate)
+
+        elapsed = time.monotonic() - start_time
+        logger.info(
+            "registry_maven_found",
+            query=query,
+            maven_results=len(docs),
+            github_mapped=len(candidates),
+            elapsed_seconds=round(elapsed, 3),
+        )
+
+        return ChannelResult(
+            channel=DiscoveryChannel.REGISTRY,
+            candidates=candidates[:max_results],
+            total_found=total,
+            has_more=total > len(candidates),
+            elapsed_seconds=elapsed,
+        )
+
     async def search(self, query: DiscoveryQuery) -> ChannelResult:
         """Search configured registries and aggregate results.
 
-        Runs both ``search_pypi`` and ``search_npm`` concurrently,
-        merges results, deduplicates by ``full_name``, and respects
-        ``query.max_candidates``.
+        Runs ``search_pypi``, ``search_npm``, ``search_crates_io``, and
+        ``search_maven`` concurrently, merges results, deduplicates by
+        ``full_name``, and respects ``query.max_candidates``.
 
         Args:
             query: Discovery query with search term and limits.
@@ -305,13 +472,17 @@ class RegistryChannel:
         """
         start_time = time.monotonic()
 
-        # Run both registries concurrently
+        # Run all four registries concurrently
         pypi_task = self.search_pypi(query.query)
         npm_task = self.search_npm(query.query, max_results=query.max_candidates)
+        crates_task = self.search_crates_io(query.query, max_results=query.max_candidates)
+        maven_task = self.search_maven(query.query, max_results=query.max_candidates)
 
-        pypi_result, npm_result = await asyncio.gather(
+        pypi_result, npm_result, crates_result, maven_result = await asyncio.gather(
             pypi_task,
             npm_task,
+            crates_task,
+            maven_task,
             return_exceptions=True,
         )
 
@@ -330,10 +501,24 @@ class RegistryChannel:
                 error=str(npm_result),
             )
             npm_result = self._empty_result()
+        if isinstance(crates_result, Exception):
+            logger.warning(
+                "registry_crates_io_failed",
+                error_type=type(crates_result).__name__,
+                error=str(crates_result),
+            )
+            crates_result = self._empty_result()
+        if isinstance(maven_result, Exception):
+            logger.warning(
+                "registry_maven_failed",
+                error_type=type(maven_result).__name__,
+                error=str(maven_result),
+            )
+            maven_result = self._empty_result()
 
         # Merge and deduplicate by full_name
         seen: dict[str, RepoCandidate] = {}
-        for result in (pypi_result, npm_result):
+        for result in (pypi_result, npm_result, crates_result, maven_result):
             if not isinstance(result, ChannelResult):
                 continue
             for candidate in result.candidates:
@@ -436,6 +621,46 @@ class RegistryChannel:
         return None
 
     @staticmethod
+    def _extract_github_from_crates(crate: dict[str, Any]) -> str | None:
+        """Extract GitHub URL from a crates.io crate object.
+
+        Checks homepage, repository, then documentation fields.
+
+        Args:
+            crate: Crates.io crate object from search results.
+
+        Returns:
+            Clean GitHub URL or None.
+        """
+        for key in ("homepage", "repository", "documentation"):
+            url = crate.get(key)
+            github = _extract_github_url(url)
+            if github:
+                return github
+
+        return None
+
+    @staticmethod
+    def _extract_github_from_maven(doc: dict[str, Any]) -> str | None:
+        """Extract GitHub URL from a Maven Central Solr document.
+
+        Checks repositoryUrl field for a GitHub URL.
+
+        Args:
+            doc: Maven Solr document from search results.
+
+        Returns:
+            Clean GitHub URL or None.
+        """
+        repo_url = doc.get("repositoryUrl")
+        if isinstance(repo_url, str):
+            github = _extract_github_url(repo_url)
+            if github:
+                return github
+
+        return None
+
+    @staticmethod
     def _pypi_summary(data: dict[str, Any]) -> str:
         """Extract summary from PyPI response data.
 
@@ -473,7 +698,7 @@ class RegistryChannel:
         full_name = f"{owner}/{repo}"
         now = datetime.now(UTC)
 
-        return RepoCandidate(
+        candidate = RepoCandidate(
             full_name=full_name,
             url=github_url,
             html_url=github_url,
@@ -485,9 +710,11 @@ class RegistryChannel:
             updated_at=now,
             owner_login=owner,
         )
+        # TA3: Classify domain for scoring profile selection
+        candidate.domain = classify_candidate(candidate)
+        return candidate
 
-    @staticmethod
-    def _empty_result(*, elapsed: float = 0.0) -> ChannelResult:
+    def _empty_result(self, *, elapsed: float = 0.0) -> ChannelResult:
         """Create an empty ChannelResult for the registry channel.
 
         Args:

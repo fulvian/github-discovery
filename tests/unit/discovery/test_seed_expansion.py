@@ -536,3 +536,183 @@ class TestExpand:
         assert isinstance(result, ChannelResult)
         assert result.candidates == []
         rest_client.get_all_pages.assert_not_called()
+
+
+# --- auto_discover_seeds ---
+
+
+class TestAutoDiscoverSeeds:
+    """Tests for the auto-discover seeds method (Wave H6)."""
+
+    async def test_auto_discover_seeds_returns_urls(self) -> None:
+        """GitHub search returns top repo URLs."""
+        rest_client = AsyncMock()
+        graphql_client = AsyncMock()
+
+        search_items = [
+            {"html_url": "https://github.com/pallets/flask"},
+            {"html_url": "https://github.com/pallets/jinja"},
+            {"html_url": "https://github.com/pallets/werkzeug"},
+        ]
+        rest_client.search = AsyncMock(return_value=(search_items, 3))
+
+        expansion = SeedExpansion(rest_client, graphql_client)
+        seeds = await expansion.auto_discover_seeds("python web framework")
+
+        assert len(seeds) == 3
+        assert "https://github.com/pallets/flask" in seeds
+        rest_client.search.assert_awaited_once_with(
+            "/search/repositories",
+            "python web framework",
+            sort="stars",
+            order="desc",
+            max_pages=1,
+            per_page=3,
+        )
+
+    async def test_auto_discover_seeds_respects_max_seeds(self) -> None:
+        """Only returns max_seeds URLs."""
+        rest_client = AsyncMock()
+        graphql_client = AsyncMock()
+
+        search_items = [
+            {"html_url": "https://github.com/a/1"},
+            {"html_url": "https://github.com/b/2"},
+            {"html_url": "https://github.com/c/3"},
+            {"html_url": "https://github.com/d/4"},
+            {"html_url": "https://github.com/e/5"},
+        ]
+        rest_client.search = AsyncMock(return_value=(search_items, 5))
+
+        expansion = SeedExpansion(rest_client, graphql_client)
+        seeds = await expansion.auto_discover_seeds("test query", max_seeds=2)
+
+        assert len(seeds) == 2
+
+    async def test_auto_discover_seeds_filters_empty_urls(self) -> None:
+        """Items without html_url are filtered out."""
+        rest_client = AsyncMock()
+        graphql_client = AsyncMock()
+
+        search_items = [
+            {"html_url": "https://github.com/a/1"},
+            {"html_url": ""},
+            {"no_url": True},
+        ]
+        rest_client.search = AsyncMock(return_value=(search_items, 3))
+
+        expansion = SeedExpansion(rest_client, graphql_client)
+        seeds = await expansion.auto_discover_seeds("test query")
+
+        assert len(seeds) == 1
+        assert seeds[0] == "https://github.com/a/1"
+
+    async def test_auto_discover_seeds_returns_empty_on_error(self) -> None:
+        """API failure returns empty list, no exception raised."""
+        rest_client = AsyncMock()
+        graphql_client = AsyncMock()
+
+        rest_client.search = AsyncMock(side_effect=Exception("API error"))
+
+        expansion = SeedExpansion(rest_client, graphql_client)
+        seeds = await expansion.auto_discover_seeds("test query")
+
+        assert seeds == []
+
+    async def test_auto_discover_seeds_empty_results(self) -> None:
+        """Empty search results returns empty list."""
+        rest_client = AsyncMock()
+        graphql_client = AsyncMock()
+
+        rest_client.search = AsyncMock(return_value=([], 0))
+
+        expansion = SeedExpansion(rest_client, graphql_client)
+        seeds = await expansion.auto_discover_seeds("obscure nonexistent topic")
+
+        assert seeds == []
+
+
+# --- expand with auto_seed_query (Wave H6) ---
+
+
+class TestExpandAutoSeed:
+    """Tests for expand() with auto_seed_query parameter."""
+
+    async def test_expand_auto_seed_discovers_and_expands(self) -> None:
+        """Empty seed_urls + auto_seed_query → auto-discover seeds, then expand."""
+        rest_client = AsyncMock()
+        graphql_client = AsyncMock()
+
+        # auto_discover_seeds returns seed URLs
+        search_items = [
+            {"html_url": "https://github.com/pallets/flask"},
+        ]
+        rest_client.search = AsyncMock(return_value=(search_items, 1))
+
+        # org expansion returns repos
+        org_repos = [_make_repo_json("pallets/werkzeug")]
+        rest_client.get_all_pages = AsyncMock(return_value=org_repos)
+
+        expansion = SeedExpansion(rest_client, graphql_client)
+        result = await expansion.expand(
+            seed_urls=[],
+            auto_seed_query="python web framework",
+        )
+
+        assert isinstance(result, ChannelResult)
+        assert result.channel == DiscoveryChannel.SEED_EXPANSION
+        # Should have called search to auto-discover seeds
+        rest_client.search.assert_awaited_once()
+        # Should have expanded from the discovered seed
+        assert len(result.candidates) >= 1
+        names = {c.full_name for c in result.candidates}
+        assert "pallets/werkzeug" in names
+
+    async def test_expand_auto_seed_empty_query_ignored(self) -> None:
+        """auto_seed_query=None with empty seed_urls → empty result (no auto-discovery)."""
+        rest_client = AsyncMock()
+        graphql_client = AsyncMock()
+
+        expansion = SeedExpansion(rest_client, graphql_client)
+        result = await expansion.expand(
+            seed_urls=[],
+            auto_seed_query=None,
+        )
+
+        assert result.candidates == []
+        rest_client.search.assert_not_called()
+
+    async def test_expand_auto_seed_no_results_returns_empty(self) -> None:
+        """Auto-discover finds nothing → empty result, no crash."""
+        rest_client = AsyncMock()
+        graphql_client = AsyncMock()
+
+        rest_client.search = AsyncMock(return_value=([], 0))
+
+        expansion = SeedExpansion(rest_client, graphql_client)
+        result = await expansion.expand(
+            seed_urls=[],
+            auto_seed_query="obscure topic",
+        )
+
+        assert result.candidates == []
+        rest_client.search.assert_awaited_once()
+
+    async def test_expand_explicit_seeds_ignore_auto_seed_query(self) -> None:
+        """When seed_urls is provided, auto_seed_query is ignored."""
+        rest_client = AsyncMock()
+        graphql_client = AsyncMock()
+
+        rest_client.get_all_pages = AsyncMock(
+            return_value=[_make_repo_json("pallets/werkzeug")],
+        )
+
+        expansion = SeedExpansion(rest_client, graphql_client)
+        result = await expansion.expand(
+            seed_urls=["https://github.com/pallets/flask"],
+            auto_seed_query="should be ignored",
+        )
+
+        # Should NOT have called search (seeds were provided explicitly)
+        rest_client.search.assert_not_called()
+        assert len(result.candidates) >= 1

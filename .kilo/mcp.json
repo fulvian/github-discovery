@@ -6,7 +6,8 @@
       "headers": {
         "X-MCP-Toolsets": "repos,issues,pull_requests,context",
         "X-MCP-Readonly": "true"
-      }
+      },
+      "disabled": true
     },
     "github-discovery": {
       "type": "local",

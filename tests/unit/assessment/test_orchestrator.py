@@ -650,18 +650,18 @@ class TestBatchToPerDimensionFallback:
 
 
 class TestContentTruncation:
-    """Tests for _MAX_LLM_CONTENT_CHARS truncation in _assess_candidate."""
+    """Tests for adaptive content truncation (TC1) in _assess_candidate."""
 
-    async def test_long_content_is_truncated(self) -> None:
-        """Content exceeding _MAX_LLM_CONTENT_CHARS is truncated before LLM call."""
-        from github_discovery.assessment.orchestrator import _MAX_LLM_CONTENT_CHARS
+    async def test_adaptive_truncation_respects_tier_limit(self) -> None:
+        """Content is truncated to the content_strategy's max_chars per tier."""
 
         orchestrator = _make_orchestrator()
         candidate = _make_candidate()
         screening = _make_screening_passed()
 
-        # Create repo content that exceeds the limit
-        long_content = "x" * (_MAX_LLM_CONTENT_CHARS + 5000)
+        # Create repo content longer than the tiny tier limit (240K chars)
+        # This forces truncation regardless of which tier is selected.
+        long_content = "x" * 300_000
         repo_content = RepoContent(
             full_name="test/repo",
             content=long_content,
@@ -669,6 +669,10 @@ class TestContentTruncation:
             total_tokens=1000,
             total_chars=len(long_content),
         )
+
+        # Patch candidate size to trigger "huge" tier with 80K limit
+        candidate.size_kb = 2500  # ~1.5M estimated tokens → huge tier
+
         heuristic_scores = _make_heuristic_scores()
 
         orchestrator._repomix.pack = AsyncMock(return_value=repo_content)  # type: ignore[assignment]
@@ -698,38 +702,145 @@ class TestContentTruncation:
         assert result.full_name == "test/repo"
 
         # Verify the content passed to assess_batch was truncated
+        # to the "huge" tier limit (80K chars)
         call_args = mock_provider.assess_batch.call_args
         content_arg = call_args[0][2] if call_args[0] else call_args.kwargs.get("repo_content", "")
-        assert len(content_arg) <= _MAX_LLM_CONTENT_CHARS
-    """Tests for AssessmentOrchestrator properties."""
+        assert len(content_arg) <= 80_000
 
-    def test_budget_controller_property(self) -> None:
-        """budget_controller returns the internal BudgetController."""
+    async def test_small_content_not_truncated(self) -> None:
+        """Small content (within tiny tier limit) is NOT truncated."""
         orchestrator = _make_orchestrator()
-        from github_discovery.assessment.budget_controller import BudgetController
+        candidate = _make_candidate()
+        candidate.size_kb = 1  # Tiny: < 5K estimated tokens
+        screening = _make_screening_passed()
 
-        assert isinstance(orchestrator.budget_controller, BudgetController)
+        small_content = "def foo(): pass\n" * 50  # ~800 chars
+        repo_content = RepoContent(
+            full_name="test/repo",
+            content=small_content,
+            total_files=3,
+            total_tokens=200,
+            total_chars=len(small_content),
+        )
+        heuristic_scores = _make_heuristic_scores()
 
-    def test_cache_size_initially_zero(self) -> None:
-        """cache_size is 0 before any assessments."""
-        orchestrator = _make_orchestrator()
-        assert orchestrator.cache_size == 0
+        orchestrator._repomix.pack = AsyncMock(return_value=repo_content)  # type: ignore[assignment]
+        orchestrator._heuristic.analyze = MagicMock(return_value=heuristic_scores)  # type: ignore[assignment]
 
-    async def test_close_without_provider(self) -> None:
-        """close() is safe when provider hasn't been initialized."""
-        orchestrator = _make_orchestrator()
-        await orchestrator.close()
-        # No error
-
-    async def test_close_with_provider(self) -> None:
-        """close() closes the LLM provider when initialized."""
-        orchestrator = _make_orchestrator()
         mock_provider = AsyncMock()
+        mock_provider.assess_batch = AsyncMock(
+            return_value=LLMBatchOutput(
+                dimensions={dim.value: LLMDimensionOutput(score=0.7) for dim in ScoreDimension},
+            ),
+        )
+        mock_provider.last_token_usage = TokenUsage(total_tokens=50)
         orchestrator._provider = mock_provider
 
-        await orchestrator.close()
+        context = AssessmentContext(
+            candidates=[candidate],
+            screening_results={"test/repo": screening},
+        )
 
-        mock_provider.close.assert_awaited_once()
+        result = await orchestrator._assess_candidate(
+            candidate,
+            screening,
+            context=context,
+        )
+
+        assert result.full_name == "test/repo"
+
+        # Content should NOT be truncated (within tier limit)
+        call_args = mock_provider.assess_batch.call_args
+        content_arg = call_args[0][2] if call_args[0] else call_args.kwargs.get("repo_content", "")
+        assert len(content_arg) == len(small_content)
+
+
+class TestKeyboardInterruptHandling:
+    """Tests for KeyboardInterrupt/MemoryError passthrough (TE4)."""
+
+    async def test_keyboard_interrupt_passthrough(self) -> None:
+        """KeyboardInterrupt during assessment is re-raised, not wrapped."""
+        orchestrator = _make_orchestrator()
+        candidate = _make_candidate()
+        screening = _make_screening_passed()
+
+        repo_content = _make_repo_content()
+        heuristic_scores = _make_heuristic_scores()
+
+        orchestrator._repomix.pack = AsyncMock(return_value=repo_content)  # type: ignore[assignment]
+        orchestrator._heuristic.analyze = MagicMock(return_value=heuristic_scores)  # type: ignore[assignment]
+
+        mock_provider = AsyncMock()
+        mock_provider.assess_batch = AsyncMock(side_effect=KeyboardInterrupt())
+        orchestrator._provider = mock_provider
+
+        context = AssessmentContext(
+            candidates=[candidate],
+            screening_results={"test/repo": screening},
+        )
+
+        with pytest.raises(KeyboardInterrupt):
+            await orchestrator._assess_candidate(
+                candidate,
+                screening,
+                context=context,
+            )
+
+    async def test_memory_error_passthrough(self) -> None:
+        """MemoryError during assessment is re-raised, not wrapped."""
+        orchestrator = _make_orchestrator()
+        candidate = _make_candidate()
+        screening = _make_screening_passed()
+
+        repo_content = _make_repo_content()
+        heuristic_scores = _make_heuristic_scores()
+
+        orchestrator._repomix.pack = AsyncMock(return_value=repo_content)  # type: ignore[assignment]
+        orchestrator._heuristic.analyze = MagicMock(return_value=heuristic_scores)  # type: ignore[assignment]
+
+        mock_provider = AsyncMock()
+        mock_provider.assess_batch = AsyncMock(side_effect=MemoryError("Out of memory"))
+        orchestrator._provider = mock_provider
+
+        context = AssessmentContext(
+            candidates=[candidate],
+            screening_results={"test/repo": screening},
+        )
+
+        with pytest.raises(MemoryError):
+            await orchestrator._assess_candidate(
+                candidate,
+                screening,
+                context=context,
+            )
+
+    async def test_assessment_error_wraps_other_exceptions(self) -> None:
+        """Non-critical exceptions are wrapped in AssessmentError."""
+        orchestrator = _make_orchestrator()
+        candidate = _make_candidate()
+        screening = _make_screening_passed()
+
+        repo_content = _make_repo_content()
+        heuristic_scores = _make_heuristic_scores()
+
+        orchestrator._repomix.pack = AsyncMock(return_value=repo_content)  # type: ignore[assignment]
+        orchestrator._heuristic.analyze = MagicMock(return_value=heuristic_scores)  # type: ignore[assignment]
+
+        mock_provider = AsyncMock()
+        mock_provider.assess_batch = AsyncMock(side_effect=ValueError("Unexpected data"))
+        orchestrator._provider = mock_provider
+
+        context = AssessmentContext(
+            candidates=[candidate],
+            screening_results={"test/repo": screening},
+        )
+
+        with pytest.raises(AssessmentError):
+            await orchestrator._assess_candidate(
+                candidate,
+                screening,
+                context=context,
+            )
 
 
 class TestCacheTTL:

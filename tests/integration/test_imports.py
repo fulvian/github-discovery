@@ -14,7 +14,7 @@ from github_discovery.models.session import SessionState
 
 def test_import_main_package() -> None:
     """Main package is importable."""
-    assert __version__ == "0.1.0-alpha"
+    assert __version__ == "0.3.0-beta"
 
 
 def test_import_config() -> None:

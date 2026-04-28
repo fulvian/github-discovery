@@ -13,19 +13,26 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from github_discovery.discovery.domain_classifier import classify_candidate
 from github_discovery.discovery.types import ChannelResult, DiscoveryQuery
 from github_discovery.models.candidate import RepoCandidate
-from github_discovery.models.enums import DiscoveryChannel
+from github_discovery.models.enums import DiscoveryChannel, DomainType
 
 if TYPE_CHECKING:
+    from github_discovery.config import Settings
     from github_discovery.discovery.github_client import GitHubRestClient
 
 logger = structlog.get_logger("github_discovery.discovery.search_channel")
 
 # --- Constants ---
 
-_MEGA_POPULAR_STAR_THRESHOLD = 100_000
-_INACTIVITY_DAYS = 180  # ~6 months
+_DEFAULT_INACTIVITY_DAYS = 180  # ~6 months (general default)
+# Domain-specific inactivity thresholds (Wave H1 adaptive filter)
+_DOMAIN_ACTIVITY_DAYS: dict[DomainType, int] = {
+    DomainType.LANG_TOOL: 365,  # Language tools evolve slowly
+    DomainType.SECURITY_TOOL: 90,  # Security tools need frequent updates
+    DomainType.DEVOPS_TOOL: 90,  # CI/CD tools change with platform APIs
+}
 _SEARCH_ENDPOINT = "/search/repositories"
 _DEFAULT_SORT = "updated"
 _DEFAULT_ORDER = "desc"
@@ -40,19 +47,56 @@ class SearchChannel:
     Sorts by recency/updated by default to reduce popularity bias.
     """
 
-    def __init__(self, client: GitHubRestClient) -> None:
+    def __init__(
+        self,
+        client: GitHubRestClient,
+        *,
+        settings: Settings | None = None,
+    ) -> None:
         """Initialize with a GitHub REST client.
 
         Args:
             client: Configured GitHubRestClient for API calls.
+            settings: Optional settings for configurable thresholds.
         """
         self._client = client
+        self._settings = settings
+
+    def _get_activity_days(self, query: DiscoveryQuery) -> int:
+        """Get domain-aware inactivity threshold (Wave H1 adaptive filter).
+
+        Priority:
+        1. Config override ``GHDISC_DISCOVERY_ACTIVITY_DAYS``
+        2. Domain-specific default (SECURITY_TOOL=90, LANG_TOOL=365, etc.)
+        3. General default (180)
+
+        Args:
+            query: Discovery query with optional ``domain_hint``.
+
+        Returns:
+            Number of days without push activity considered "inactive".
+        """
+        # Priority 1: env config override
+        if self._settings and self._settings.discovery.activity_days is not None:
+            return self._settings.discovery.activity_days
+
+        # Priority 2: domain-specific threshold
+        domain = query.domain_hint
+        if domain is not None and domain in _DOMAIN_ACTIVITY_DAYS:
+            return _DOMAIN_ACTIVITY_DAYS[domain]
+
+        # Priority 3: general default
+        return _DEFAULT_INACTIVITY_DAYS
 
     def build_query(self, query: DiscoveryQuery) -> str:
         """Build GitHub search query string with qualifiers.
 
         Constructs the `q` parameter for /search/repositories, adding
         qualifiers for language, topics, activity, and visibility.
+
+        Uses domain-aware inactivity threshold (H1): SECURITY_TOOL=90d,
+        LANG_TOOL=365d, default=180d. Configurable via
+        ``GHDISC_DISCOVERY_ACTIVITY_DAYS``.
 
         Args:
             query: Discovery query with optional filters.
@@ -71,8 +115,9 @@ class SearchChannel:
             for topic in query.topics:
                 parts.append(f"topic:{topic}")
 
-        # Exclude inactive repos (pushed within last ~6 months)
-        cutoff = datetime.now(UTC) - timedelta(days=_INACTIVITY_DAYS)
+        # H1: Domain-aware inactivity filter
+        activity_days = self._get_activity_days(query)
+        cutoff = datetime.now(UTC) - timedelta(days=activity_days)
         parts.append(f"pushed:>{cutoff.strftime('%Y-%m-%d')}")
 
         # Exclude archived repos
@@ -82,7 +127,12 @@ class SearchChannel:
         parts.append("is:public")
 
         # Exclude mega-popular repos (reduce noise, not bias — quality is evaluated independently)
-        parts.append(f"-stars:>{_MEGA_POPULAR_STAR_THRESHOLD}")
+        # TA1: Configurable via GHDISC_DISCOVERY_MEGA_POPULAR_STAR_THRESHOLD
+        threshold = (
+            self._settings.discovery.mega_popular_star_threshold if self._settings else 100_000
+        )
+        if threshold is not None:
+            parts.append(f"-stars:>{threshold}")
 
         return " ".join(parts)
 
@@ -101,6 +151,27 @@ class SearchChannel:
         start_time = time.monotonic()
 
         query_string = self.build_query(query)
+
+        # TA2: Structured query logging for transparency
+        # H1: Use domain-aware activity threshold for log accuracy
+        activity_days = self._get_activity_days(query)
+        cutoff = datetime.now(UTC) - timedelta(days=activity_days)
+        threshold = (
+            self._settings.discovery.mega_popular_star_threshold if self._settings else 100_000
+        )
+        logger.info(
+            "discovery_query_built",
+            channel="search",
+            query_string=query_string,
+            qualifiers={
+                "language": query.language,
+                "topics": query.topics,
+                "pushed_after": cutoff.isoformat(),
+                "inactivity_days": activity_days,
+                "exclude_archived": True,
+                "mega_popular_threshold": threshold,
+            },
+        )
 
         # Calculate pagination parameters to avoid over-fetching
         per_page = min(_MAX_PER_PAGE, query.max_candidates)
@@ -160,7 +231,7 @@ class SearchChannel:
         raw_score = item.get("score", 1.0)
         discovery_score = min(raw_score / _GITHUB_SCORE_NORMALIZATION_FACTOR, 1.0)
 
-        return RepoCandidate(
+        candidate = RepoCandidate(
             full_name=full_name,
             url=html_url,
             html_url=html_url,
@@ -183,3 +254,6 @@ class SearchChannel:
             source_channel=DiscoveryChannel.SEARCH,
             discovery_score=discovery_score,
         )
+        # TA3: Classify domain for scoring profile selection
+        candidate.domain = classify_candidate(candidate)
+        return candidate

@@ -358,7 +358,10 @@ def _print_ranking(result: object, fmt: str) -> None:
                 "full_name": repo.full_name,
                 "quality_score": round(repo.quality_score, 4),
                 "value_score": round(repo.value_score, 4),
+                "coverage": round(repo.score_result.coverage, 4),
                 "confidence": round(repo.score_result.confidence, 4),
+                "degraded": repo.score_result.degraded,
+                "gate3": repo.score_result.gate3_available,
                 "stars": repo.stars,
                 "corroboration_level": repo.score_result.corroboration_level,
             }
@@ -368,6 +371,7 @@ def _print_ranking(result: object, fmt: str) -> None:
             {
                 "full_name": repo.full_name,
                 "quality_score": round(repo.quality_score, 4),
+                "coverage": round(repo.score_result.coverage, 4),
                 "stars": repo.stars,
                 "corroboration_level": repo.score_result.corroboration_level,
             }

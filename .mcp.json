@@ -7,7 +7,8 @@
         "Authorization": "Bearer ${GITHUB_TOKEN}",
         "X-MCP-Toolsets": "repos,issues,pull_requests,context",
         "X-MCP-Readonly": "true"
-      }
+      },
+      "disabled": true
     },
     "github-discovery": {
       "command": "/home/fulvio/coding/github-discovery/.venv/bin/python",

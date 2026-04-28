@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from github_discovery.discovery.domain_classifier import classify_candidate
 from github_discovery.discovery.types import ChannelResult, DiscoveryQuery
 from github_discovery.models.candidate import RepoCandidate
 from github_discovery.models.enums import DiscoveryChannel
@@ -340,6 +341,8 @@ class DependencyChannel:
                 updated_at=now,
                 owner_login=owner,
             )
+            # TA3: Classify domain for scoring profile selection
+            candidate.domain = classify_candidate(candidate)
             candidates.append(candidate)
 
         return candidates
